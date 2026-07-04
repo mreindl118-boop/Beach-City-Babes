@@ -219,6 +219,7 @@ const FACT_REVEALS = [
   { key: 'dislikes', line: 'Pet peeve gifts? {dislikes}. Bring me that and watch my face do a thing.' },
   { key: 'quirk',    line: 'Confession time: I {quirktext}. Judge me. I dare you.' },
   { key: 'type',     line: 'My type? I date {wants}. Extra points for {roleloves}.' },
+  { key: 'rel',      line: 'How I do relationships? {relstyle}. Better you know now than dramatically later.' },
 ];
 
 function factCtx(c) {
@@ -231,6 +232,9 @@ function factCtx(c) {
     quirktext: quirkOf(c).text.replace(/^is |^has |^loves |^does |^puts |^reads |^writes |^rides |^dances |^collects |^swears /, m => m),
     wants,
     roleloves: arch.rolesLoved.join(' or ') + ' types',
+    relstyle: c.relStyle === 'poly'
+      ? 'I’m polyamorous — my heart has guest rooms, and I keep them honest'
+      : 'I’m a one-person-at-a-time heart. When I’m in, I’m all in',
   };
 }
 
@@ -512,6 +516,20 @@ export function proactiveText(c, player, rng, kind) {
       { t: 2, s: 'So who was that today, hm? Should I be sharpening anything?' },
     ], tier, rng), ctx);
   }
+  if (kind === 'checkin') { // poly + open agreement: honesty is the love language
+    return fill(rng.pick([
+      'Heard you were out with someone cute today. GOOD. Full report tomorrow — I want ratings, categories, everything 😄',
+      'My spies say you had a date. Proud of you, {pet}. Bring me gossip and a churro and all is celebrated.',
+      'Busy little heartbreaker today, huh? 😏 Love that for you. Save Thursday for me though.',
+    ]), ctx);
+  }
+  if (kind === 'metamour') { // they see other people too — and say so
+    return fill(rng.pick([
+      'FYI: seeing my Tuesday person tonight 🎳 You’re still my favorite weekend plan. Honesty hour, as promised.',
+      'Date night with my other flame tonight — telling you because that’s the deal and the deal is sacred. Miss your face already 💛',
+      'My moon-and-stars rotation is busy this week but YOU, {pet}, are penciled in permanent ink. Contradiction intended.',
+    ]), ctx);
+  }
   if (kind === 'partner') {
     return fill(rng.pick([
       'Good morning, trouble. Dreamed about you. Again. This is getting embarrassing 💘',
@@ -635,4 +653,242 @@ export function textExchange(c, player, kind, rng) {
   return ok
     ? { out, reply: fill(pickTiered(bank.ok, tier, rng), ctx), dAff: 2, dDes: 2, accepted: true }
     : { out, reply: fill(pickTiered(bank.fail, tier, rng), ctx), dAff: 0, dDes: 0, accepted: false };
+}
+
+// ---------- relationship structure: DTR, cheating, straying ----------
+// A DTR ("define the relationship") talk. Openers differ by wiring and by
+// who started it (the player's Heart-to-heart move, or the NPC cornering you).
+export function dtrOpen(c, player, rng, npcInitiated = false) {
+  const ctx = ctxFor(c, player, rng);
+  const bank = npcInitiated
+    ? (c.relStyle === 'mono' ? [
+        'So. Um. What ARE we, exactly? Because I don’t share well, and I need to know if I should be guarding my heart.',
+        'Real talk, {pet}. I’m a one-person person. Is this... going where I think it’s going?',
+      ] : [
+        'Hey. Honesty hour. I’m poly — I date more than one person sometimes, always in the open. What are you looking for with me?',
+        'Before this goes further: I don’t do secrets. Multiple loves, zero lies — that’s my whole thing. Where’s your head at?',
+      ])
+    : (c.relStyle === 'mono' ? [
+        '*sets down {pos} drink slowly* Okay. You have my full attention. What are we, {player}?',
+        'I was hoping you’d bring this up. I hate floating. Tell me what you want us to be.',
+      ] : [
+        'Mm, the Talk. Okay — cards up: I’m polyamorous. Honest, open, no sneaking. Your move, {pet}.',
+        'You want to define this? Cute. Fair warning: my definition includes honesty and might include other people. Talk to me.',
+      ]);
+  return fill(rng.pick(bank), ctx);
+}
+
+export const DTR_CHOICES = [
+  { id: 'exclusive', label: '💍 “Just you and me. Exclusive.”' },
+  { id: 'open',      label: '💞 “Open and honest — I see other people.”' },
+  { id: 'nolabel',   label: '😅 “Can we not label it yet?”' },
+];
+
+export function resolveDTR(c, player, choice, rng) {
+  const ctx = ctxFor(c, player, rng);
+  if (choice === 'exclusive') {
+    if (c.relStyle === 'mono') {
+      c.agreement = 'exclusive';
+      c.pendingDTR = false;
+      addMemory(c, 'the night you two went exclusive');
+      return { dAff: 12, dDes: 4, emotion: 'love', npcText: fill(rng.pick([
+        '*the smile takes a second to arrive and then it’s everywhere* Yes. YES. Okay. You’re mine now. Officially. No givebacks.',
+        'Exclusive. I like that word so much better than I let on. C’mere, {pet}. Deal’s sealed.',
+      ]), ctx) };
+    }
+    // poly hearts don't promise exclusivity — they counter-offer honesty
+    c.agreement = 'open';
+    c.pendingDTR = false;
+    return { dAff: 5, dDes: 0, emotion: 'shy', npcText: fill(rng.pick([
+      'That’s sweet, and I mean this kindly: I can’t promise “only.” It’s not how I’m built. What I CAN promise is you’ll always know the truth. Take honest-me or leave me.',
+      'Careful — I’d hate to lie to you. Exclusivity isn’t mine to give. Total honesty is. That’s the deal on the table, {pet}.',
+    ]), ctx) };
+  }
+  if (choice === 'open') {
+    if (c.relStyle === 'poly') {
+      c.agreement = 'open';
+      c.pendingDTR = false;
+      addMemory(c, 'the refreshingly honest Talk');
+      return { dAff: 10, dDes: 5, emotion: 'love', npcText: fill(rng.pick([
+        'See, THIS is why I like you. Open and honest — biggest green flag on the beach. Just never lie to me and we’re golden.',
+        '*grins* A person who says the quiet part out loud. Deal. Date whoever — just tell me the good gossip first.',
+      ]), ctx) };
+    }
+    c.agreement = 'none';
+    c.pendingDTR = false;
+    c.mood = Math.max(-2, c.mood - 1);
+    return { dAff: -10, dDes: -3, emotion: 'sad', npcText: fill(rng.pick([
+      '...Oh. Thank you for being honest. Truly. But I want ALL of somebody, not a timeshare. I need to think about what that means for us.',
+      '*long look at the ocean* Honest hurts less than a lie, but it still hurts, {pet}. I’m a one-person heart. Figure out if I’m worth it.',
+    ]), ctx) };
+  }
+  // nolabel
+  c.dtrDeflects = (c.dtrDeflects ?? 0) + 1;
+  c.pendingDTR = false;
+  const strike2 = c.relStyle === 'mono' && c.dtrDeflects >= 2;
+  if (strike2) { c.mood = Math.max(-2, c.mood - 1); }
+  return {
+    dAff: strike2 ? -6 : -1, dDes: 0, emotion: strike2 ? 'sad' : 'smirk',
+    npcText: fill(strike2 ? rng.pick([
+      'That’s the second time you’ve dodged this. I notice things, {pet}. A girl can only float for so long.',
+      'Mm. “No labels” twice in a row. I hear what you’re not saying, and it’s getting loud.',
+    ]) : rng.pick([
+      'Ha! Fine, mystery it is. For now. This conversation has a rain date, though.',
+      '“No labels.” Okay, cool, casual, whatever. *aggressively sips drink*',
+    ]), ctx),
+  };
+}
+
+// Confrontation: the gossip mill delivered. severity by what was promised.
+export function confrontOpen(c, player, rng) {
+  const ctx = ctxFor(c, player, rng);
+  const bank = c.agreement === 'exclusive' ? [
+    '*arms crossed, eyes shining* Word travels on this beach, {player}. You promised me EXCLUSIVE. Tell me what I heard isn’t true.',
+    'Don’t. Just— don’t open with cute. Three people saw you. We had a DEAL, {player}.',
+  ] : c.relStyle === 'mono' ? [
+    'So... I heard you’ve been making the rounds. We never promised anything, I know. But I thought— ugh. Say something.',
+    'A little bird — okay, four little birds — told me about you and your busy calendar. I don’t own you. It still stings.',
+  ] : [
+    'Hey. Heard you’ve been seeing people. Which — fine! I’m poly, remember? What’s NOT fine is hearing it from the smoothie guy instead of you.',
+    'Relax, I’m not mad you date. I’m mad you hid it. Sneaking is the one thing my rules can’t hold.',
+  ];
+  return fill(rng.pick(bank), ctx);
+}
+
+export const CONFRONT_CHOICES = [
+  { id: 'apologize', label: '😔 Own it and apologize' },
+  { id: 'confess',   label: '🙏 Come clean about everything' },
+  { id: 'deny',      label: '🤥 Deny everything' },
+];
+
+export function resolveConfront(c, player, choice, rng, { preemptive = false } = {}) {
+  const ctx = ctxFor(c, player, rng);
+  const exclusive = c.agreement === 'exclusive';
+  const soften = preemptive ? 0.6 : 1;
+
+  if (choice === 'deny' && !preemptive) {
+    const p = Math.min(0.75, 0.35 + (player.stats?.charm ?? 0) * 0.04);
+    c.pendingConfront = false;
+    if (rng.chance(p)) {
+      c.suspicion = 0;
+      c.mood = Math.max(-2, c.mood - 1);
+      return { outcome: 'denied', dAff: -4, dDes: 0, emotion: 'smirk', npcText: fill(rng.pick([
+        '...Hm. Okay. Maybe the beach exaggerates. It does that. *watches you a beat too long* Forget I said anything.',
+        'You’re either innocent or very good. I genuinely can’t tell, and I hate that I like that about you.',
+      ]), ctx) };
+    }
+    c.betrayed = true; c.agreement = 'none'; c.partner = false;
+    c.mood = -2; c.suspicion = 0; c.guilt = 0;
+    addMemory(c, 'the lie you told with a straight face');
+    return { outcome: 'blowup', dAff: -35, dDes: -20, emotion: 'annoyed', npcText: fill(rng.pick([
+      'Lie to my FACE? My cousin took the photos, {player}. We’re done. And everyone on this beach is going to know why.',
+      '*dead calm* Wrong answer. I gave you the door and you chose the trapdoor. Goodbye, {player}. The group chat will hear about this.',
+    ]), ctx) };
+  }
+
+  if (choice === 'confess' || (choice === 'deny' && preemptive)) {
+    if (exclusive) {
+      // honesty at the cliff's edge: they demand you choose
+      return { outcome: 'ultimatum', dAff: Math.round(-12 * soften), dDes: -4, emotion: 'sad', npcText: fill(rng.pick([
+        '*quiet for a long moment* Thank you for the truth. Here’s mine: I won’t split you with anybody. Them or me, {player}. Choose.',
+        'Okay. Honesty. I can work with honesty. So here’s the honest question: is it me, or is it everyone else? Pick one. Now.',
+      ]), ctx) };
+    }
+    if (c.relStyle === 'poly') {
+      c.agreement = 'open'; c.suspicion = 0; c.guilt = 0;
+      c.pendingConfront = false;
+      addMemory(c, 'the day you chose honesty');
+      return { outcome: 'opened', dAff: 8, dDes: 2, emotion: 'happy', npcText: fill(rng.pick([
+        'THERE it is. Truth looks good on you. New rule, one rule: I hear it from you first. Now — tell me everything, I want DETAILS.',
+        '*exhales* Okay. We’re okay. Honesty resets the board, {pet}. Keep dating your people. Just keep me in the loop.',
+      ]), ctx) };
+    }
+    c.suspicion = 0; c.guilt = 0; c.pendingConfront = false; c.pendingDTR = true;
+    c.mood = Math.max(-2, c.mood - 1);
+    return { outcome: 'hurt', dAff: Math.round(-12 * soften), dDes: -3, emotion: 'sad', npcText: fill(rng.pick([
+      'I appreciate the truth. I do. But I’m not built for crowds, {player}. We need to figure out what this is. Soon.',
+      '*nods slowly* Honest hurts clean, at least. Think about what you actually want. Then come find me for the real Talk.',
+    ]), ctx) };
+  }
+
+  // apologize
+  c.strikes = (c.strikes ?? 0) + 1;
+  c.suspicion = 0; c.guilt = 0; c.pendingConfront = false;
+  if (exclusive && c.strikes >= 2) {
+    c.betrayed = true; c.agreement = 'none'; c.partner = false; c.mood = -2;
+    return { outcome: 'blowup', dAff: -30, dDes: -15, emotion: 'annoyed', npcText: fill(rng.pick([
+      'You apologized LAST time. Fool me once, shame on you. Fool me twice— no. No. We’re done, {player}.',
+    ]), ctx) };
+  }
+  c.mood = Math.max(-2, c.mood - 2);
+  const dAff = Math.round((exclusive ? -25 : c.relStyle === 'mono' ? -14 : -7) * soften);
+  return { outcome: 'strike', dAff, dDes: -6, emotion: 'sad', npcText: fill(rng.pick(exclusive ? [
+    '*wipes {pos} eyes fast, angry about it* One. You get one, {player}. Because I’m stupid about you. Do NOT make me regret this.',
+    'I should walk. Everyone would tell me to walk. ...One more chance. Last one. Earn it back.',
+  ] : [
+    'Yeah. Okay. Apology heard. Just... be a person who tells me things, alright?',
+    '*long sigh* Fine. We’re fine. Adjacent to fine. Bring snacks next time, it helps the healing.',
+  ]), ctx) };
+}
+
+// They strayed (neglected exclusive partner) and are confessing.
+export function strayOpen(c, player, rng) {
+  const ctx = ctxFor(c, player, rng);
+  return fill(rng.pick([
+    '*can’t meet your eyes* I have to tell you something and I hate it. Last night at the tiki bar... I kissed someone. It was stupid. You’d been a ghost for days and I— no. No excuses. I’m sorry, {player}.',
+    'I need to say this fast or I won’t say it. Someone kissed me and for three seconds I let them. I felt sick the whole moped ride home. You deserve the truth from me, not the boardwalk.',
+  ]), ctx);
+}
+
+export const STRAY_CHOICES = [
+  { id: 'forgive', label: '💗 “Thank you for telling me. Come here.”' },
+  { id: 'leave',   label: '💔 “I can’t do this. We’re done.”' },
+];
+
+export function resolveStray(c, player, choice, rng) {
+  const ctx = ctxFor(c, player, rng);
+  c.pendingCheatConfess = false;
+  if (choice === 'forgive') {
+    c.loyal = true; c.mood = 1;
+    addMemory(c, 'the night you forgave and {sub} chose you for good');
+    return { dAff: -8, dDes: 0, emotion: 'shy', npcText: fill(rng.pick([
+      '*breaks a little, then holds on tight* I don’t deserve— okay. Okay. Never again, {player}. You have ALL of me now. I mean it like a vow.',
+      'You’re really not walking? *laughs wetly* Worst decision, best human. Never again. I promise on every seashell I own.',
+    ]), ctx) };
+  }
+  c.agreement = 'none'; c.partner = false; c.mood = -2; c.betrayed = false;
+  addMemory(c, 'the goodbye on the pier');
+  return { dAff: -30, dDes: -20, emotion: 'sad', npcText: fill(rng.pick([
+    '*nods, tears free-falling* That’s fair. That’s— yeah. For what it’s worth, you were the best almost I ever had. Bye, {player}.',
+    'I get it. I broke it. *backs away slowly, hand over mouth* Be happy, okay? Really. One of us should be.',
+  ]), ctx) };
+}
+
+// Choosing at the ultimatum.
+export function resolveUltimatum(c, player, choseThem, rng) {
+  const ctx = ctxFor(c, player, rng);
+  if (choseThem) {
+    c.suspicion = 0; c.guilt = 0; c.pendingConfront = false; c.mood = 0;
+    addMemory(c, 'the day you chose {obj} over everyone');
+    return { dAff: 6, dDes: 4, emotion: 'love', npcText: fill(rng.pick([
+      '*searches your face for the lie and doesn’t find it* ...Okay. Okay. Then we start over, properly. Just us. Don’t make me regret being this happy.',
+      'Me? You’re choosing me? *fists your collar, forehead to yours* Right answer. RIGHT answer. Clean slate — but I keep the receipts.',
+    ]), ctx) };
+  }
+  c.agreement = 'none'; c.partner = false; c.betrayed = true; c.mood = -2;
+  c.suspicion = 0; c.guilt = 0; c.pendingConfront = false;
+  return { dAff: -25, dDes: -15, emotion: 'sad', npcText: fill(rng.pick([
+    '*nods like something closed* At least you didn’t lie at the end. Goodbye, {player}. Don’t text me when the beach gets lonely.',
+    'Freedom. Cool. Enjoy it. *walks into the crowd without looking back*',
+  ]), ctx) };
+}
+
+// Group hangout afterglow lines from each metamour.
+export function groupAfterline(c, other, player, rng) {
+  const ctx = ctxFor(c, player, rng, { other: other.name });
+  return garnish(c, fill(rng.pick([
+    'Okay, {other} is a MENACE and I love it. We’re keeping this arrangement. All of it. Including you, obviously.',
+    'Between us? I get why you like {other}. Between us also? I like how you look when we’re all laughing. Do this again soon.',
+    'Group consensus reached while you bought the drinks: you’re stuck with us both now. Motion passed unanimously.',
+  ]), ctx), rng);
 }

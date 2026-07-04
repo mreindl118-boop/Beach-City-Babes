@@ -6,6 +6,9 @@ import {
 
 export const SKIN_TONES = ['#8d5524', '#a9713f', '#c68642', '#e0ac69', '#f1c27d', '#ffdbac'];
 export const HAIR_COLORS = ['#1b1b1b', '#3b2314', '#6b3d1e', '#a5622a', '#d8973c', '#f2d16b', '#b03a48', '#7b4fa6', '#2e6f95', '#e88fb2'];
+// Sticker-Pop accent: hair tips, iris, nails, sparkles and UI all key off this.
+export const ACCENTS = ['#22d3ee', '#f43f5e', '#e879f9', '#a3e635', '#fb923c', '#818cf8', '#2dd4bf', '#fb7185'];
+export const ACCENT_NAMES = ['cyan', 'crimson', 'magenta', 'lime', 'tangerine', 'violet', 'teal', 'rose'];
 export const EYE_COLORS = ['#4a2c1a', '#2f5d3a', '#2b5f8a', '#6b4fa0', '#7a7a2e', '#444444'];
 export const SUIT_COLORS = ['#ff5d8f', '#ff9f1c', '#2ec4b6', '#7b2cbf', '#e63946', '#3a86ff', '#06d6a0', '#fb5607'];
 export const HAIR_STYLES = {
@@ -51,6 +54,19 @@ export function generateCharacter(rng, usedNames = new Set()) {
     pronouns,
     presentation,
     attractedTo: rollAttraction(rng),
+    // relationship structure: how this heart is wired
+    relStyle: rng.weighted([['mono', 6], ['poly', 4]]),
+    agreement: 'none',      // none | exclusive | open — what you two agreed
+    dtrDeflects: 0,         // times the player dodged "what are we?"
+    guilt: 0,               // your uncaught romantic acts elsewhere (vs. this NPC)
+    suspicion: 0,           // what the gossip mill has carried to them
+    strikes: 0,             // forgiven betrayals — nobody forgives twice
+    betrayed: false,
+    loyal: false,           // survived a stray-and-forgive; never strays again
+    pendingConfront: false, // they heard something. next visit gets loud
+    pendingCheatConfess: false, // they strayed and need to tell you
+    pendingDTR: false,      // they want the "what are we?" talk
+    chem: {},               // npcId -> bool: poly metamour spark (persisted roll)
     age: rng.int(21, 34),
     job: rng.pick(JOBS),
     hometown: rng.pick(HOMETOWNS),
@@ -59,6 +75,7 @@ export function generateCharacter(rng, usedNames = new Set()) {
     body: rng.pick(presentation === 'fem'
       ? ['slim', 'curvy', 'athletic', 'soft', 'muscular']
       : ['slim', 'athletic', 'soft', 'muscular', 'curvy']),
+    measurements: null, // filled by ensureMeasurements — continuous, per-body-type
     look: {
       skin: rng.int(0, SKIN_TONES.length - 1),
       hairColor: rng.int(0, HAIR_COLORS.length - 1),
@@ -66,6 +83,7 @@ export function generateCharacter(rng, usedNames = new Set()) {
       eyes: rng.int(0, EYE_COLORS.length - 1),
       suit: rng.int(0, SUIT_COLORS.length - 1),
       suitB: rng.int(0, SUIT_COLORS.length - 1),
+      accent: rng.int(0, ACCENTS.length - 1),
       accessory: rng.pick(ACCESSORIES),
     },
     // stats
@@ -74,7 +92,7 @@ export function generateCharacter(rng, usedNames = new Set()) {
     spark: 0,                // arousal combo: chained romantic beats surge desire
     mood: 0,                 // -2 .. +2
     // what the player has uncovered
-    known: { job: false, hometown: false, loves: false, dislikes: false, quirk: false, type: false },
+    known: { job: false, hometown: false, loves: false, dislikes: false, quirk: false, type: false, rel: false },
     // rotating desire system
     currentDesire: null,
     desireHinted: false,
@@ -91,6 +109,46 @@ export function generateCharacter(rng, usedNames = new Set()) {
 export const pronounsOf = c => PRONOUN_SETS[c.pronouns] || PRONOUN_SETS.they;
 export const archetypeOf = c => ARCHETYPES.find(a => a.id === c.archetype);
 export const quirkOf = c => QUIRKS.find(q => q.id === c.quirk);
+
+// Continuous silhouette genes: sampled inside the body-type's range with
+// jitter so no two characters share a body. Values are multipliers the art
+// engine turns into a bespoke figure.
+const BODY_RANGES = {
+  slim:     { bust: [0.80, 1.05], waist: [0.68, 0.82], hips: [0.85, 1.08], sh: [0.85, 1.00] },
+  curvy:    { bust: [1.25, 1.60], waist: [0.64, 0.78], hips: [1.28, 1.62], sh: [0.90, 1.05] },
+  athletic: { bust: [0.95, 1.15], waist: [0.74, 0.88], hips: [1.00, 1.18], sh: [1.05, 1.22] },
+  soft:     { bust: [1.15, 1.45], waist: [0.95, 1.15], hips: [1.20, 1.52], sh: [0.95, 1.10] },
+  muscular: { bust: [1.00, 1.22], waist: [0.80, 0.95], hips: [0.95, 1.12], sh: [1.22, 1.42] },
+};
+const POSES = ['sway-l', 'sway-r', 'square'];
+
+export function ensureMeasurements(c, rng) {
+  if (c.measurements) return c.measurements;
+  const r = BODY_RANGES[c.body] || BODY_RANGES.slim;
+  c.measurements = {
+    bust: rng.float(...r.bust),
+    waist: rng.float(...r.waist),
+    hips: rng.float(...r.hips),
+    sh: rng.float(...r.sh),
+    pose: rng.pick(POSES),
+    lips: rng.float(0.8, 1.3),
+    lashes: rng.chance(0.7),
+    beautyMark: rng.chance(0.25),
+  };
+  return c.measurements;
+}
+
+// Would these two NPCs be into each other? Poly-only, orientation-gated, then
+// a persisted spark roll — poly people aren't automatically into each other.
+export function npcChemistry(a, b, rng) {
+  if (a.relStyle !== 'poly' || b.relStyle !== 'poly') return false;
+  if (a.chem?.[b.id] != null) return a.chem[b.id];
+  const mutual = a.attractedTo.includes(b.gender) && b.attractedTo.includes(a.gender);
+  const spark = mutual && rng.chance(0.6);
+  (a.chem ??= {})[b.id] = spark;
+  (b.chem ??= {})[a.id] = spark;
+  return spark;
+}
 
 // Is this NPC romantically available to the player at all?
 // Attraction is to gender identity — trans women are women, trans men are men.

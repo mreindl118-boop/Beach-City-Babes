@@ -1,11 +1,18 @@
-// Procedural animated 2D portraits — anime/ecchi styling, pure SVG.
-// Big gradient eyes (heart pupils when smitten), pointy chin, blush stripes,
-// strandy hair with shine, cheesecake proportions. Outfits get more daring and
-// the backdrop shifts day → sunset → sultry night as heat rises.
+// Procedural animated 2D portraits — "Sticker-Pop Cartoon" style, pure SVG.
+// Every character reads like a die-cut sticker: a white outer stroke wraps the
+// whole silhouette (feMorphology dilate), thick warm-brown interior outlines,
+// flat cel shading (one hard shadow + white specular shines per region),
+// two-tone hair (dark roots melting into a vivid accent), and accent-color
+// coordination across iris, nails, sparkles and UI. Bodies are parametric —
+// continuous bust/waist/hip/shoulder measurements plus a pose, so no two
+// silhouettes repeat. Hips/thighs carry the dominant silhouette read.
 // Idle animations (breathing, blinking, sway) are CSS-driven — see style.css.
-import { SKIN_TONES, HAIR_COLORS, EYE_COLORS, SUIT_COLORS } from './characters.js';
+import {
+  SKIN_TONES, HAIR_COLORS, SUIT_COLORS, ACCENTS, ACCENT_NAMES,
+} from './characters.js';
+import { BODY_LABELS, GENDER_LABELS } from './data.js';
 
-function shade(hex, amt) {
+export function shade(hex, amt) {
   const n = parseInt(hex.slice(1), 16);
   const r = Math.max(0, Math.min(255, (n >> 16) + amt));
   const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amt));
@@ -13,287 +20,345 @@ function shade(hex, amt) {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
 
-// Body geometry: shoulder half-width, waist half-width, bust scale (anime-exaggerated).
-const BODY_GEO = {
-  slim:     { sh: 30, wa: 20, bust: 0.9 },
-  curvy:    { sh: 32, wa: 18, bust: 1.5 },
-  athletic: { sh: 40, wa: 20, bust: 1.05 },
-  soft:     { sh: 38, wa: 32, bust: 1.3 },
-  muscular: { sh: 48, wa: 26, bust: 1.15 },
-};
+const OUT = '#3b2a23'; // warm near-black interior outline
 
-// Hair: big anime silhouettes (back) + jagged bangs (front). ahoge = antenna.
+// ---------- hair: chunky sticker silhouettes, gradient root → accent ----------
 const HAIR_BACK = {
-  waves: 'M50 90 C26 118 26 196 40 226 L52 208 L60 228 L72 210 L82 230 L118 230 L128 210 L140 228 L148 208 L160 226 C174 196 174 118 150 90 C130 58 70 58 50 90 Z',
-  ponytail: 'M58 88 C44 104 42 132 50 152 L150 152 C158 124 154 100 142 88 C122 60 76 60 58 88 Z M138 92 C172 104 178 168 162 214 L150 200 L154 226 L138 206 C146 168 146 128 130 104 Z',
-  bob: 'M52 90 C36 116 38 160 54 178 L64 166 L70 180 L130 180 L136 166 L146 178 C162 160 164 116 148 90 C128 58 72 58 52 90 Z',
-  curls: 'M48 94 C24 124 28 200 50 220 L60 206 L68 224 L132 224 L140 206 L150 220 C172 200 176 124 152 94 C132 56 68 56 48 94 Z',
-  bun: 'M56 90 C46 108 46 130 52 146 L148 146 C154 130 154 108 144 90 C124 58 76 58 56 90 Z M76 54 A26 22 0 1 1 124 54 A26 22 0 1 1 76 54 Z',
-  short: 'M56 90 C48 102 48 118 52 130 L148 130 C152 118 152 102 144 90 C124 56 76 56 56 90 Z',
-  swoop: 'M54 92 C46 106 46 124 52 134 L148 134 C154 120 154 100 144 88 C124 54 72 58 54 92 Z',
-  buzz: 'M60 90 C54 100 54 112 58 120 L142 120 C146 112 146 100 140 90 C124 62 76 62 60 90 Z',
-  curlsShort: 'M54 90 C44 102 44 124 52 136 L148 136 C156 124 156 102 146 90 C126 54 74 54 54 90 Z',
-  manbun: 'M56 90 C50 100 50 116 54 126 L146 126 C150 116 150 100 144 90 C124 58 76 58 56 90 Z M84 50 A17 15 0 1 1 116 50 A17 15 0 1 1 84 50 Z',
+  waves: 'M58 70 C38 92 38 152 52 180 Q60 190 70 180 Q68 194 82 192 Q94 202 100 190 Q106 202 118 192 Q132 194 130 180 Q140 190 148 180 C162 152 162 92 142 70 C128 42 72 42 58 70 Z',
+  ponytail: 'M62 70 C50 82 48 104 56 118 L144 118 C152 104 150 82 138 70 C124 42 76 42 62 70 Z M134 76 C168 92 174 152 158 194 Q150 204 143 192 Q136 202 131 188 C142 154 142 116 124 94 Z',
+  bob: 'M58 70 C44 90 46 130 60 146 Q66 156 76 146 L124 146 Q134 156 140 146 C154 130 156 90 142 70 C128 42 72 42 58 70 Z',
+  curls: 'M56 76 C40 82 36 108 48 120 C36 132 42 156 58 160 C52 176 68 188 82 180 C88 194 112 194 118 180 C132 188 148 176 142 160 C158 156 164 132 152 120 C164 108 160 82 144 76 C136 46 64 46 56 76 Z',
+  bun: 'M60 70 C50 82 48 102 56 116 L144 116 C152 102 150 82 140 70 C126 42 74 42 60 70 Z M82 34 A20 17 0 1 1 118 34 A20 17 0 1 1 82 34 Z',
+  short: 'M60 68 C50 78 50 96 56 106 L144 106 C150 96 150 78 140 68 C126 42 74 42 60 68 Z',
+  swoop: 'M58 70 C48 82 48 102 54 112 L146 112 C152 98 152 78 142 66 C126 38 72 44 58 70 Z',
+  buzz: 'M64 66 C60 74 60 86 62 94 L138 94 C140 86 140 74 136 66 C124 42 76 42 64 66 Z',
+  curlsShort: 'M56 70 C46 80 46 104 54 114 Q60 122 68 114 L132 114 Q140 122 146 114 C154 104 154 80 144 70 C128 40 72 40 56 70 Z',
+  manbun: 'M60 68 C52 78 52 96 56 106 L144 106 C148 96 148 78 140 68 C126 42 74 42 60 68 Z M88 28 A13 11 0 1 1 112 28 A13 11 0 1 1 88 28 Z',
 };
 
 const HAIR_FRONT = {
-  waves: 'M52 96 C56 66 82 56 100 56 C118 56 144 66 148 96 L138 86 L132 98 L122 82 L112 96 L100 78 L88 96 L78 82 L68 98 L62 86 Z',
-  ponytail: 'M54 94 C60 64 84 56 100 56 C116 56 140 64 146 94 L134 84 L124 94 L110 78 L96 94 L82 80 L70 94 L60 86 Z',
-  bob: 'M52 96 C58 64 82 54 100 54 C118 54 142 64 148 96 L136 88 L128 98 L116 82 L104 96 L92 80 L80 96 L68 84 L60 96 Z',
-  curls: 'M50 98 C54 64 80 54 100 54 C120 54 146 64 150 98 L138 86 L130 100 L118 84 L106 98 L94 82 L82 98 L70 86 L60 100 Z',
-  bun: 'M54 94 C60 62 84 54 100 54 C116 54 140 62 146 94 L132 84 L120 94 L104 78 L90 94 L76 82 L64 94 Z',
-  short: 'M56 92 C62 62 84 56 100 56 C116 56 138 62 144 92 L132 82 L120 90 L106 76 L92 90 L78 80 L66 92 Z',
-  swoop: 'M54 94 C60 60 84 54 100 54 C120 54 142 64 146 92 L128 72 L110 88 L88 70 L74 86 L62 82 Z',
-  buzz: 'M60 88 C66 68 84 62 100 62 C116 62 134 68 140 88 L124 80 L108 84 L92 78 L74 84 Z',
-  curlsShort: 'M54 92 C58 60 82 52 100 52 C118 52 142 60 146 92 L134 82 L124 94 L112 78 L98 92 L86 78 L74 92 L62 82 Z',
-  manbun: 'M58 90 C64 62 84 56 100 56 C116 56 136 62 142 90 L126 78 L110 86 L92 76 L74 86 L64 90 Z',
+  waves: 'M64 72 C66 46 88 38 100 38 C112 38 134 46 136 72 Q128 60 119 68 Q112 54 100 60 Q88 52 81 68 Q72 60 64 72 Z',
+  ponytail: 'M64 70 C68 44 88 38 100 38 C112 38 132 44 136 70 Q126 58 114 64 Q104 52 92 62 Q80 56 64 70 Z',
+  bob: 'M62 72 C66 44 86 36 100 36 C114 36 134 44 138 72 Q130 60 120 68 Q112 54 100 62 Q88 52 80 68 Q70 60 62 72 Z',
+  curls: 'M62 74 C64 46 84 36 100 36 C116 36 136 46 138 74 Q130 62 121 70 Q114 56 103 64 Q94 54 85 66 Q74 60 62 74 Z',
+  bun: 'M64 70 C68 44 86 38 100 38 C114 38 132 44 136 70 Q124 58 110 64 Q98 52 86 64 Q74 58 64 70 Z',
+  short: 'M66 68 C70 46 88 40 100 40 C112 40 130 46 134 68 Q124 58 112 62 Q100 52 88 62 Q76 58 66 68 Z',
+  swoop: 'M62 70 C66 42 86 36 100 36 C116 36 136 46 138 68 Q120 50 104 62 Q86 46 76 60 Q68 62 62 70 Z',
+  buzz: 'M68 62 Q100 50 132 62 Q100 56 68 62 Z',
+  curlsShort: 'M62 70 C64 42 84 34 100 34 C116 34 136 42 138 70 Q128 58 118 66 Q108 52 98 62 Q88 52 78 64 Q70 58 62 70 Z',
+  manbun: 'M66 66 C70 46 88 40 100 40 C112 40 130 46 134 66 Q120 54 106 60 Q94 50 82 60 Q74 58 66 66 Z',
 };
 
-const AHOGE = { waves: 1, curls: 1, ponytail: 1, curlsShort: 1 }; // styles that get the antenna
+const AHOGE = { waves: 1, curls: 1, ponytail: 1, curlsShort: 1 };
 
-// Emotion table: brow tilt, mouth path, blush 0..1, lid droop 0..1, pupil shape.
+// ---------- faces: adult, heavy-lidded, confident ----------
+// brow: translateY · lids: droop 0..1 · pupil: dot|heart · teeth: grin band
 const EMOTIONS = {
-  neutral: { brow: 0,  mouth: 'M93 132 Q100 136 107 132',                    blush: 0.15, lids: 0,    pupil: 'dot' },
-  happy:   { brow: -2, mouth: 'M90 130 Q100 142 110 130',                    blush: 0.3,  lids: 0,    pupil: 'dot' },
-  laugh:   { brow: -3, mouth: 'M88 128 Q100 146 112 128 Q100 138 88 128 Z',  blush: 0.4,  lids: 0.4,  pupil: 'dot' },
-  shy:     { brow: 3,  mouth: 'M94 134 Q100 138 106 134',                    blush: 0.8,  lids: 0.3,  pupil: 'dot' },
-  love:    { brow: -2, mouth: 'M90 130 Q100 143 110 130',                    blush: 0.85, lids: 0.2,  pupil: 'heart' },
-  sultry:  { brow: -3, mouth: 'M92 132 Q102 140 110 130',                    blush: 1,    lids: 0.5,  pupil: 'heart' },
-  smirk:   { brow: -4, mouth: 'M92 133 Q103 139 110 129',                    blush: 0.45, lids: 0.2,  pupil: 'dot' },
-  annoyed: { brow: 6,  mouth: 'M92 137 Q100 131 108 137',                    blush: 0,    lids: 0.3,  pupil: 'dot' },
-  sad:     { brow: 5,  mouth: 'M92 137 Q100 132 108 137',                    blush: 0.15, lids: 0.25, pupil: 'dot' },
-  kiss:    { brow: -1, mouth: 'M96 131 Q100 128 104 131 Q100 138 96 131 Z',  blush: 0.95, lids: 0.6,  pupil: 'heart' },
+  neutral: { brow: 0,  lids: 0.18, blush: 0.15, pupil: 'dot',   teeth: false, mouth: 'M93 95 Q101 99 108 93.5' },
+  smug:    { brow: -3, lids: 0.3,  blush: 0.35, pupil: 'dot',   teeth: false, mouth: 'M92 95.5 Q103 100 110 92.5' },
+  teasing: { brow: -3, lids: 0.25, blush: 0.45, pupil: 'dot',   teeth: true,  mouth: 'M90 93.5 Q100 102 110 93.5 Q100 97 90 93.5 Z' },
+  happy:   { brow: -2, lids: 0.05, blush: 0.3,  pupil: 'dot',   teeth: true,  mouth: 'M88 93 Q100 105 112 93 Q100 97 88 93 Z' },
+  laugh:   { brow: -3, lids: 0.45, blush: 0.4,  pupil: 'dot',   teeth: true,  mouth: 'M86 92 Q100 110 114 92 Q100 98 86 92 Z' },
+  shy:     { brow: 2,  lids: 0.3,  blush: 0.8,  pupil: 'dot',   teeth: false, mouth: 'M95 96 Q100 99 105 96' },
+  love:    { brow: -2, lids: 0.2,  blush: 0.85, pupil: 'heart', teeth: true,  mouth: 'M89 93.5 Q100 104 111 93.5 Q100 97.5 89 93.5 Z' },
+  sultry:  { brow: -3, lids: 0.55, blush: 1,    pupil: 'heart', teeth: false, mouth: 'M93 96 Q104 100.5 110 93.5' },
+  annoyed: { brow: 5,  lids: 0.3,  blush: 0,    pupil: 'dot',   teeth: false, mouth: 'M92 98.5 Q100 94.5 108 98.5' },
+  sad:     { brow: 4,  lids: 0.25, blush: 0.15, pupil: 'dot',   teeth: false, mouth: 'M92 98 Q100 95 108 98' },
+  kiss:    { brow: -1, lids: 0.6,  blush: 0.95, pupil: 'heart', teeth: false, mouth: 'M96 95 Q100 92.5 104 95 Q100 100 96 95 Z' },
 };
 
-function backdrop(uid, heat) {
-  // heat 0: pastel beach day · 1: golden sunset · 2: sultry night
-  if (heat >= 2) {
-    return `
-      <radialGradient id="bg-${uid}" cx="50%" cy="30%" r="85%">
-        <stop offset="0%" stop-color="#4a2a6b"/><stop offset="100%" stop-color="#1d1035"/>
-      </radialGradient>
-      <rect width="200" height="260" fill="url(#bg-${uid})"/>
-      <circle cx="160" cy="40" r="14" fill="#ffe9c4" opacity="0.9"/>
-      <circle cx="154" cy="36" r="12" fill="#1d1035" opacity="0.55"/>
-      ${[[22, 30], [58, 18], [96, 44], [130, 22], [178, 66], [40, 66], [12, 92]].map(([x, y], i) =>
-        `<circle cx="${x}" cy="${y}" r="${1 + (i % 3) * 0.7}" fill="#fff" opacity="0.8" class="tw tw-${i % 3}"/>`).join('')}
-      <rect width="200" height="260" fill="#ff5d8f" opacity="0.07"/>
-      <g class="tw" fill="#ffd1e8" opacity="0.9">
-        <path d="M24 150 l2.5 5 5 2.5 -5 2.5 -2.5 5 -2.5 -5 -5 -2.5 5 -2.5 Z"/>
-        <path d="M176 120 l2 4 4 2 -4 2 -2 4 -2 -4 -4 -2 4 -2 Z"/>
-      </g>`;
-  }
-  if (heat === 1) {
-    return `
-      <linearGradient id="bg-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#ffb26b"/><stop offset="60%" stop-color="#ff7d9c"/><stop offset="100%" stop-color="#c86b9b"/>
-      </linearGradient>
-      <rect width="200" height="260" fill="url(#bg-${uid})"/>
-      <circle cx="100" cy="70" r="30" fill="#ffe9a8" opacity="0.7"/>`;
-  }
-  return `
-    <radialGradient id="bg-${uid}" cx="50%" cy="35%" r="80%">
-      <stop offset="0%" stop-color="#ffeef5"/><stop offset="100%" stop-color="#ffc4d6"/>
-    </radialGradient>
-    <rect width="200" height="260" fill="url(#bg-${uid})"/>
-    <circle cx="100" cy="250" r="92" fill="#ffffff" opacity="0.4"/>`;
-}
-
-// Torso + outfit, parametrized by body geometry, presentation and heat tier.
-function torso(c, heat) {
-  const g = BODY_GEO[c.body];
-  const skin = SKIN_TONES[c.look.skin];
-  const skinD = shade(skin, -30);
-  const skinL = shade(skin, 22);
-  const suit = SUIT_COLORS[c.look.suit];
-  const suitB = SUIT_COLORS[c.look.suitB];
-  const L = 100 - g.sh, R = 100 + g.sh;
-  const wL = 100 - g.wa, wR = 100 + g.wa;
-  // anime shoulders: slope from neck, pinched waist
-  const bodyPath = `M${wL} 260 C${wL - 2} 224 ${L} 206 ${L + 4} 198 C${L + 10} 190 ${R - 10} 190 ${R - 4} 198 C${R} 206 ${wR + 2} 224 ${wR} 260 Z`;
-  const bodyFill = `<path d="${bodyPath}" fill="${skin}"/>
-    <path d="${bodyPath}" fill="url(#sheen)" opacity="${heat >= 1 ? 0.5 : 0.2}"/>`;
-  const neck = `<path d="M91 148 L91 176 Q100 184 109 176 L109 148 Z" fill="${skin}"/>
-    <path d="M91 150 Q100 160 109 150 L109 156 Q100 165 91 156 Z" fill="${skinD}" opacity="0.45"/>`;
-  const bw = 15 * g.bust;
-
-  if (c.presentation === 'fem') {
-    // anime bust: two circles + cleavage line at heat>=1
-    const bustY = 218, bustR = 8 + 7 * g.bust;
-    const bust = `
-      <circle cx="${100 - bw * 0.62}" cy="${bustY}" r="${bustR}" fill="${skin}"/>
-      <circle cx="${100 + bw * 0.62}" cy="${bustY}" r="${bustR}" fill="${skin}"/>
-      ${heat >= 1 ? `<path d="M100 ${bustY - bustR * 0.55} C97 ${bustY - 2} 97 ${bustY + 2} 100 ${bustY + bustR * 0.5}" stroke="${skinD}" stroke-width="2.2" fill="none" opacity="0.6"/>` : ''}
-      <ellipse cx="${100 - bw * 0.72}" cy="${bustY - bustR * 0.45}" rx="${bustR * 0.36}" ry="${bustR * 0.2}" fill="${skinL}" opacity="0.7"/>
-      <ellipse cx="${100 + bw * 0.5}" cy="${bustY - bustR * 0.45}" rx="${bustR * 0.36}" ry="${bustR * 0.2}" fill="${skinL}" opacity="0.7"/>`;
-    if (heat === 0) {
-      // cute one-piece with a bow
-      return `${bodyFill}${bust}
-        <path d="M${wL + 2} 260 C${wL + 2} 228 ${L + 8} 210 100 206 C${R - 8} 210 ${wR - 2} 228 ${wR - 2} 260 Z" fill="${suit}"/>
-        <path d="M${100 - bw - 6} 210 Q100 200 ${100 + bw + 6} 210 L${100 + bw} 236 Q100 228 ${100 - bw} 236 Z" fill="${suitB}"/>
-        <path d="M96 206 l-7 -5 1 6 -6 2 6 2 -1 6 7 -5 7 5 -1 -6 6 -2 -6 -2 1 -6 Z" fill="#fff" opacity="0.9"/>
-        ${neck}`;
-    }
-    if (heat === 1) {
-      // classic bikini
-      return `${bodyFill}${bust}
-        <g stroke="${suit}" stroke-width="3" fill="none">
-          <path d="M${100 - bw * 0.62} ${bustY - bustR} L93 160"/><path d="M${100 + bw * 0.62} ${bustY - bustR} L107 160"/>
-        </g>
-        <path d="M${100 - bw * 0.62 - bustR} ${bustY - 4} Q${100 - bw * 0.62} ${bustY - bustR - 3} ${100 - 2} ${bustY - 2} L${100 - bw * 0.62 + 2} ${bustY + bustR - 1} Q${100 - bw * 0.62 - bustR - 1} ${bustY + bustR * 0.5} ${100 - bw * 0.62 - bustR} ${bustY - 4} Z" fill="${suit}"/>
-        <path d="M${100 + bw * 0.62 + bustR} ${bustY - 4} Q${100 + bw * 0.62} ${bustY - bustR - 3} ${100 + 2} ${bustY - 2} L${100 + bw * 0.62 - 2} ${bustY + bustR - 1} Q${100 + bw * 0.62 + bustR + 1} ${bustY + bustR * 0.5} ${100 + bw * 0.62 + bustR} ${bustY - 4} Z" fill="${suit}"/>
-        <circle cx="100" cy="${bustY}" r="3.2" fill="${suitB}"/>
-        ${neck}`;
-    }
-    // daring string micro-bikini + sparkles
-    return `${bodyFill}${bust}
-      <g stroke="${suit}" stroke-width="1.8" fill="none" opacity="0.95">
-        <path d="M${100 - bw * 0.62} ${bustY - bustR + 2} L95 160"/><path d="M${100 + bw * 0.62} ${bustY - bustR + 2} L105 160"/>
-        <path d="M${100 - bw * 0.62 - bustR} ${bustY} L${100 - g.sh - 2} 212"/><path d="M${100 + bw * 0.62 + bustR} ${bustY} L${100 + g.sh + 2} 212"/>
-      </g>
-      <path d="M${100 - bw * 0.62 - bustR * 0.7} ${bustY - 2} Q${100 - bw * 0.62} ${bustY - bustR * 0.9} ${100 - 4} ${bustY} L${100 - bw * 0.62 + 1} ${bustY + bustR * 0.8} Q${100 - bw * 0.62 - bustR * 0.8} ${bustY + bustR * 0.4} ${100 - bw * 0.62 - bustR * 0.7} ${bustY - 2} Z" fill="${suit}"/>
-      <path d="M${100 + bw * 0.62 + bustR * 0.7} ${bustY - 2} Q${100 + bw * 0.62} ${bustY - bustR * 0.9} ${100 + 4} ${bustY} L${100 + bw * 0.62 - 1} ${bustY + bustR * 0.8} Q${100 + bw * 0.62 + bustR * 0.8} ${bustY + bustR * 0.4} ${100 + bw * 0.62 + bustR * 0.7} ${bustY - 2} Z" fill="${suit}"/>
-      <g fill="#fff" opacity="0.95" class="tw">
-        <path d="M${100 - bw - 12} 206 l2.5 5 5 2.5 -5 2.5 -2.5 5 -2.5 -5 -5 -2.5 5 -2.5 Z"/>
-        <path d="M${100 + bw + 8} 240 l2 4 4 2 -4 2 -2 4 -2 -4 -4 -2 4 -2 Z" class="tw-1"/>
-      </g>
-      ${neck}`;
-  }
-
-  // masc presentation: pecs + abs, anime shading
-  const pecs = `
-    <path d="M${100 - bw - 6} 212 Q${100 - bw * 0.4} 226 ${100 - 2} 216 M${100 + 2} 216 Q${100 + bw * 0.4} 226 ${100 + bw + 6} 212"
-      stroke="${skinD}" stroke-width="2.4" fill="none" opacity="0.6"/>
-    <path d="M100 214 L100 246" stroke="${skinD}" stroke-width="2" opacity="0.4"/>
-    ${heat >= 1 ? `<path d="M92 232 h16 M92 244 h16" stroke="${skinD}" stroke-width="1.8" opacity="0.4"/>` : ''}`;
-  if (heat === 0) {
-    return `${bodyFill}
-      <path d="M${wL + 2} 260 C${wL + 2} 222 ${L + 4} 204 100 200 C${R - 4} 204 ${wR - 2} 222 ${wR - 2} 260 Z" fill="${suit}"/>
-      <path d="M${L + 10} 207 Q100 198 ${R - 10} 207 L${R - 14} 218 Q100 210 ${L + 14} 218 Z" fill="${suitB}"/>
-      ${neck}`;
-  }
-  if (heat === 1) {
-    return `${bodyFill}${pecs}
-      <path d="M${L - 2} 260 C${L - 2} 216 ${L + 2} 202 ${100 - 12} 197 L${100 - bw * 0.5} 260 Z" fill="${suit}"/>
-      <path d="M${R + 2} 260 C${R + 2} 216 ${R - 2} 202 ${100 + 12} 197 L${100 + bw * 0.5} 260 Z" fill="${suit}"/>
-      ${neck}`;
-  }
-  return `${bodyFill}${pecs}
-    <path d="M88 166 Q100 182 112 166" stroke="#e8d8b0" stroke-width="3" fill="none"/>
-    <path d="M97 179 L100 187 L103 179 Z" fill="#fff8e7"/>
-    <g fill="#fff" opacity="0.95" class="tw">
-      <path d="M${L - 6} 210 l2.5 5 5 2.5 -5 2.5 -2.5 5 -2.5 -5 -5 -2.5 5 -2.5 Z"/>
-    </g>
-    ${neck}`;
-}
-
-// heat level for art: relationship tier + a desire kicker.
 export function heatLevel(c, tier) {
   if (tier >= 3 || (tier >= 2 && c.desire >= 70)) return 2;
   if (tier >= 2 || (tier >= 1 && c.desire >= 50)) return 1;
   return 0;
 }
 
-function animeEye(cx, eyeGrad, uid) {
-  // tall anime eye: white, big gradient iris, dot & heart pupils, twin highlights
+// flat color fields, always duller than the character so the sticker pops
+function backdrop(uid, heat, accent) {
+  const bokeh = (cols, o) => cols.map(([x, y, r], i) =>
+    `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity="${o + (i % 3) * 0.03}" class="tw tw-${i % 3}"/>`).join('');
+  const vignette = `
+    <radialGradient id="vg-${uid}" cx="50%" cy="42%" r="75%">
+      <stop offset="60%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.22"/>
+    </radialGradient>
+    <rect width="200" height="300" fill="url(#vg-${uid})"/>`;
+  if (heat >= 2) {
+    return `
+      <rect width="200" height="300" fill="#26222f"/>
+      <radialGradient id="gl-${uid}" cx="50%" cy="46%" r="55%">
+        <stop offset="0%" stop-color="${accent}" stop-opacity="0.28"/><stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
+      </radialGradient>
+      <rect width="200" height="300" fill="url(#gl-${uid})"/>
+      <circle cx="162" cy="42" r="13" fill="#e8e0c8" opacity="0.9"/>
+      <circle cx="157" cy="38" r="11" fill="#26222f" opacity="0.7"/>
+      ${bokeh([[24, 40, 4], [58, 22, 2.5], [176, 84, 3.5], [16, 120, 2.5], [186, 160, 2]], 0.08)}
+      ${vignette}`;
+  }
+  if (heat === 1) {
+    return `
+      <rect width="200" height="300" fill="#b96f4e"/>
+      <circle cx="100" cy="86" r="32" fill="#e8b06a" opacity="0.9"/>
+      ${bokeh([[30, 60, 5], [166, 46, 4], [186, 130, 3], [16, 170, 3.5], [172, 210, 2.5]], 0.1)}
+      ${vignette}`;
+  }
   return `
-    <g class="p-eyeball">
-      <path d="M${cx - 12} 104 Q${cx} 88 ${cx + 12} 104 Q${cx + 11} 120 ${cx} 121 Q${cx - 11} 120 ${cx - 12} 104 Z" fill="#fff"/>
-      <ellipse cx="${cx}" cy="106" rx="8.6" ry="11.5" fill="url(#iris-${uid})"/>
-      <ellipse class="p-pupil" cx="${cx}" cy="107" rx="3.6" ry="5" fill="#151515"/>
-      <path class="p-heartpupil" d="M${cx} 103 c-2.4 -3.6 -7.6 -2 -7.6 2.2 c0 3.6 7.6 8.2 7.6 8.2 s7.6 -4.6 7.6 -8.2 c0 -4.2 -5.2 -5.8 -7.6 -2.2 Z" fill="#ff2d6f" opacity="0"/>
-      <circle cx="${cx - 3.4}" cy="99" r="3.1" fill="#fff" opacity="0.95"/>
-      <circle cx="${cx + 4}" cy="112" r="1.7" fill="#fff" opacity="0.85"/>
+    <rect width="200" height="300" fill="#dcb892"/>
+    <circle cx="100" cy="96" r="72" fill="#ecd0ac" opacity="0.8"/>
+    ${bokeh([[26, 50, 5], [172, 38, 4], [184, 118, 3], [18, 150, 3.5], [176, 226, 3]], 0.14)}
+    ${vignette}`;
+}
+
+// ---------- the parametric figure (thigh-up) ----------
+const Y = { shoulder: 128, bust: 156, waist: 190, hip: 230, bot: 300 };
+
+function figure(c, heat, m, uid) {
+  const skin = SKIN_TONES[c.look.skin];
+  const skinD = shade(skin, -26);
+  const suit = SUIT_COLORS[c.look.suit];
+  const suitB = SUIT_COLORS[c.look.suitB];
+  const accent = ACCENTS[c.look.accent ?? 0];
+  const fem = c.presentation === 'fem';
+  const hs = m.pose === 'sway-l' ? -8 : m.pose === 'sway-r' ? 8 : 0;
+  const shW = (fem ? 24 : 30) * m.sh;
+  const waistW = (fem ? 15 : 20) * m.waist;
+  const hipW = (fem ? 40 : 30) * m.hips; // hips own the silhouette
+  const legW = hipW * 0.46;
+  const L = x => 100 - x, R = x => 100 + x;
+
+  // one smooth chunky silhouette: small torso, ballooned hips/thighs
+  const bodyPath = [
+    `M${L(shW)} ${Y.shoulder}`,
+    `C${L(shW + 3)} ${Y.shoulder + 12} ${L(waistW + 8)} ${Y.waist - 22} ${L(waistW)} ${Y.waist}`,
+    `C${L(waistW + 2)} ${Y.waist + 8} ${L(hipW * 0.7) + hs} ${Y.hip - 26} ${L(hipW) + hs} ${Y.hip - 6}`,
+    `C${L(hipW + 3) + hs} ${Y.hip + 14} ${L(hipW * 0.9) + hs} ${Y.hip + 40} ${L(hipW * 0.72) + hs} ${Y.bot - 22}`,
+    `C${L(hipW * 0.62) + hs} ${Y.bot - 8} ${L(legW + 4) + hs} ${Y.bot - 2} ${L(legW) + hs} ${Y.bot}`,
+    `L${100 + hs - 3} ${Y.bot}`, `Q${100 + hs} ${Y.bot - 16} ${100 + hs + 3} ${Y.bot}`,
+    `L${R(legW) + hs} ${Y.bot}`,
+    `C${R(legW + 4) + hs} ${Y.bot - 2} ${R(hipW * 0.62) + hs} ${Y.bot - 8} ${R(hipW * 0.72) + hs} ${Y.bot - 22}`,
+    `C${R(hipW * 0.9) + hs} ${Y.hip + 40} ${R(hipW + 3) + hs} ${Y.hip + 14} ${R(hipW) + hs} ${Y.hip - 6}`,
+    `C${R(hipW * 0.7) + hs} ${Y.hip - 26} ${R(waistW + 2)} ${Y.waist + 8} ${R(waistW)} ${Y.waist}`,
+    `C${R(waistW + 8)} ${Y.waist - 22} ${R(shW + 3)} ${Y.shoulder + 12} ${R(shW)} ${Y.shoulder}`,
+    `Q100 ${Y.shoulder - 10} ${L(shW)} ${Y.shoulder} Z`,
+  ].join(' ');
+
+  // flat cel: dark base + light copy offset inside a clip = one hard shadow crescent
+  const body = `
+    <clipPath id="bc-${uid}"><path d="${bodyPath}"/></clipPath>
+    <path d="${bodyPath}" fill="${skinD}" stroke="${OUT}" stroke-width="3" stroke-linejoin="round"/>
+    <g clip-path="url(#bc-${uid})"><path d="${bodyPath}" transform="translate(-6 -4)" fill="${skin}"/></g>
+    <ellipse cx="${L(hipW * 0.55) + hs}" cy="${Y.hip + 10}" rx="7" ry="3.5" fill="#fff" opacity="0.55" transform="rotate(-18 ${L(hipW * 0.55) + hs} ${Y.hip + 10})"/>
+    <ellipse cx="${L(shW * 0.4)}" cy="${Y.shoulder + 8}" rx="5" ry="2.5" fill="#fff" opacity="0.5" transform="rotate(-14 ${L(shW * 0.4)} ${Y.shoulder + 8})"/>
+    <ellipse cx="${100 + hs * 0.6}" cy="${Y.waist + 14}" rx="2" ry="3" fill="${skinD}" opacity="0.6"/>
+    <ellipse cx="${L(hipW * 0.3) + hs}" cy="${Y.hip + 42}" rx="6" ry="4" fill="url(#blg-${uid})" opacity="0.5"/>
+    <ellipse cx="${R(hipW * 0.3) + hs}" cy="${Y.hip + 42}" rx="6" ry="4" fill="url(#blg-${uid})" opacity="0.5"/>`;
+
+  const neck = `<path d="M92 104 L92 124 Q100 132 108 124 L108 104 Z" fill="${skin}" stroke="${OUT}" stroke-width="3"/>`;
+
+  // arms: long and smooth, tiny hands, accent nails. Sway side goes akimbo.
+  const armW = 9;
+  const hand = (x, y) => `
+    <circle cx="${x}" cy="${y}" r="4.6" fill="${skin}" stroke="${OUT}" stroke-width="2.4"/>
+    <g fill="${accent}"><circle cx="${x - 2.4}" cy="${y + 3.4}" r="0.9"/><circle cx="${x}" cy="${y + 4.4}" r="0.9"/><circle cx="${x + 2.4}" cy="${y + 3.4}" r="0.9"/></g>`;
+  const limb = d => `
+    <path d="${d}" stroke="${OUT}" stroke-width="${armW + 4.5}" stroke-linecap="round" fill="none"/>
+    <path d="${d}" stroke="${skin}" stroke-width="${armW}" stroke-linecap="round" fill="none"/>`;
+  const hang = s => {
+    const x2 = 100 + s * (hipW * 0.92) + hs;
+    return limb(`M${100 + s * (shW - 2)} ${Y.shoulder + 4} C${100 + s * (shW + 8)} 166 ${100 + s * (waistW + 18)} 200 ${x2} 236`) + hand(x2, 242);
+  };
+  const akimbo = s => {
+    const xh = 100 + s * (hipW - 9) + hs;
+    return limb(`M${100 + s * (shW - 2)} ${Y.shoulder + 4} C${100 + s * (shW + 22)} 158 ${100 + s * (hipW + 24) + hs} 194 ${xh} ${Y.hip - 8}`) + hand(xh, Y.hip - 6);
+  };
+  const arms = m.pose === 'sway-l' ? akimbo(-1) + hang(1)
+    : m.pose === 'sway-r' ? hang(-1) + akimbo(1)
+    : hang(-1) + hang(1);
+
+  // chest
+  const bustR = 8 + 8 * m.bust;
+  const bo = (9 + 11 * m.bust) * 0.62;
+  const bl = 100 - bo, br = 100 + bo;
+  const chest = fem ? `
+    <circle cx="${bl}" cy="${Y.bust}" r="${bustR}" fill="${skinD}" stroke="${OUT}" stroke-width="3"/>
+    <circle cx="${br}" cy="${Y.bust}" r="${bustR}" fill="${skinD}" stroke="${OUT}" stroke-width="3"/>
+    <circle cx="${bl - 1.5}" cy="${Y.bust - 1.5}" r="${bustR - 2.2}" fill="${skin}"/>
+    <circle cx="${br - 1.5}" cy="${Y.bust - 1.5}" r="${bustR - 2.2}" fill="${skin}"/>
+    ${heat >= 1 ? `<path d="M100 ${Y.bust - bustR * 0.7} C97.5 ${Y.bust - 2} 97.5 ${Y.bust} 100 ${Y.bust + bustR * 0.4}" stroke="${OUT}" stroke-width="2.2" fill="none" opacity="0.75"/>` : ''}
+    <ellipse cx="${bl - bustR * 0.3}" cy="${Y.bust - bustR * 0.5}" rx="${bustR * 0.34}" ry="${bustR * 0.16}" fill="#fff" opacity="0.7" transform="rotate(-16 ${bl} ${Y.bust})"/>
+    <ellipse cx="${br - bustR * 0.3}" cy="${Y.bust - bustR * 0.5}" rx="${bustR * 0.34}" ry="${bustR * 0.16}" fill="#fff" opacity="0.7" transform="rotate(-16 ${br} ${Y.bust})"/>` : `
+    <path d="M${L(shW * 0.8)} ${Y.bust - 4} Q${100 - shW * 0.25} ${Y.bust + 10} 100 ${Y.bust + 3} Q${100 + shW * 0.25} ${Y.bust + 10} ${R(shW * 0.8)} ${Y.bust - 4}" stroke="${skinD}" stroke-width="2.6" fill="none" opacity="0.8"/>
+    <path d="M100 ${Y.bust + 4} L100 ${Y.waist + 2}" stroke="${skinD}" stroke-width="2.2" opacity="0.6"/>
+    ${heat >= 1 ? `<path d="M${100 - waistW * 0.55} ${Y.waist - 14} h${waistW * 1.1} M${100 - waistW * 0.45} ${Y.waist} h${waistW * 0.9}" stroke="${skinD}" stroke-width="1.8" opacity="0.55"/>` : ''}
+    ${heat >= 2 ? `<path d="M${L(hipW * 0.7) + hs} ${Y.hip - 4} Q${100 + hs} ${Y.hip + 18} ${100 + hs} ${Y.hip + 26} M${R(hipW * 0.7) + hs} ${Y.hip - 4} Q${100 + hs} ${Y.hip + 18} ${100 + hs} ${Y.hip + 26}" stroke="${skinD}" stroke-width="2" fill="none" opacity="0.55"/>` : ''}`;
+
+  // ---------- swimwear (suit color, accent-coordinated trims) ----------
+  let wear = '';
+  if (fem) {
+    const cup = (cx, sc) => `<path d="M${cx - bustR * sc} ${Y.bust - 2} Q${cx} ${Y.bust - bustR * sc * 1.4} ${cx + bustR * sc} ${Y.bust - 2} Q${cx + bustR * sc * 0.7} ${Y.bust + bustR * sc} ${cx} ${Y.bust + bustR * sc * 1.05} Q${cx - bustR * sc * 0.7} ${Y.bust + bustR * sc} ${cx - bustR * sc} ${Y.bust - 2} Z" fill="${suit}" stroke="${OUT}" stroke-width="2.4"/>`;
+    if (heat === 0) {
+      wear = `
+        <path d="M${bl - bustR} ${Y.bust - 10} Q100 ${Y.bust - bustR - 6} ${br + bustR} ${Y.bust - 10}
+          C${R(waistW + 1)} ${Y.waist - 6} ${R(hipW * 0.94) + hs} ${Y.hip - 14} ${R(hipW * 0.58) + hs} ${Y.hip + 8}
+          L${100 + hs + 10} ${Y.hip + 22} L${100 + hs - 10} ${Y.hip + 22}
+          L${L(hipW * 0.58) + hs} ${Y.hip + 8} C${L(hipW * 0.94) + hs} ${Y.hip - 14} ${L(waistW + 1)} ${Y.waist - 6} ${bl - bustR} ${Y.bust - 10} Z"
+          fill="${suit}" stroke="${OUT}" stroke-width="2.6" stroke-linejoin="round"/>
+        <path d="M${bl - bustR + 3} ${Y.bust - 8} Q100 ${Y.bust + 5} ${br + bustR - 3} ${Y.bust - 8}" stroke="${suitB}" stroke-width="4" fill="none"/>
+        <g stroke="${suit}" stroke-width="4" fill="none"><path d="M${bl} ${Y.bust - 12} L95 114"/><path d="M${br} ${Y.bust - 12} L105 114"/></g>`;
+    } else if (heat === 1) {
+      wear = `${cup(bl, 0.95)}${cup(br, 0.95)}
+        <g stroke="${suit}" stroke-width="3" fill="none">
+          <path d="M${bl} ${Y.bust - bustR} L96 112"/><path d="M${br} ${Y.bust - bustR} L104 112"/>
+          <path d="M${bl - bustR * 0.95} ${Y.bust + 2} Q100 ${Y.bust + bustR * 0.6} ${br + bustR * 0.95} ${Y.bust + 2}"/>
+        </g>
+        <path d="M${L(hipW - 2) + hs} ${Y.hip - 10} Q${100 + hs} ${Y.hip + 2} ${R(hipW - 2) + hs} ${Y.hip - 10} L${100 + hs + 5} ${Y.hip + 24} Q${100 + hs} ${Y.hip + 28} ${100 + hs - 5} ${Y.hip + 24} Z" fill="${suit}" stroke="${OUT}" stroke-width="2.6" stroke-linejoin="round"/>
+        <path d="M${L(hipW - 2) + hs} ${Y.hip - 10} Q${100 + hs} ${Y.hip + 1} ${R(hipW - 2) + hs} ${Y.hip - 10}" stroke="${suitB}" stroke-width="3" fill="none"/>`;
+    } else {
+      const bow = x => `<g stroke="${suit}" stroke-width="2" fill="none">
+          <circle cx="${x}" cy="${Y.hip - 8}" r="3.2"/><path d="M${x} ${Y.hip - 8} l-5.5 6.5 M${x} ${Y.hip - 8} l5.5 6.5"/></g>`;
+      wear = `${cup(bl, 0.58)}${cup(br, 0.58)}
+        <g stroke="${suit}" stroke-width="1.8" fill="none">
+          <path d="M${bl} ${Y.bust - bustR * 0.62} L97 112"/><path d="M${br} ${Y.bust - bustR * 0.62} L103 112"/>
+          <path d="M${bl - bustR * 0.6} ${Y.bust + 3} Q100 ${Y.bust + 8} ${br + bustR * 0.6} ${Y.bust + 3}"/>
+          <path d="M${L(hipW) + hs} ${Y.hip - 8} Q${100 + hs} ${Y.hip + 2} ${R(hipW) + hs} ${Y.hip - 8}"/>
+        </g>
+        <path d="M${100 + hs - 8} ${Y.hip} Q${100 + hs} ${Y.hip - 4} ${100 + hs + 8} ${Y.hip} L${100 + hs + 3} ${Y.hip + 22} Q${100 + hs} ${Y.hip + 25} ${100 + hs - 3} ${Y.hip + 22} Z" fill="${suit}" stroke="${OUT}" stroke-width="2.2"/>
+        ${bow(L(hipW) + hs)}${bow(R(hipW) + hs)}`;
+    }
+  } else {
+    const trunks = y => `
+      <path d="M${L(hipW - 1) + hs} ${y} Q${100 + hs} ${y + 9} ${R(hipW - 1) + hs} ${y} L${R(legW + 3) + hs} ${Y.bot} L${L(legW + 3) + hs} ${Y.bot} Z" fill="${suit}" stroke="${OUT}" stroke-width="2.6" stroke-linejoin="round"/>
+      <path d="M${L(hipW - 1) + hs} ${y} Q${100 + hs} ${y + 9} ${R(hipW - 1) + hs} ${y}" stroke="${suitB}" stroke-width="3.5" fill="none"/>
+      <path d="M${100 + hs - 5} ${y + 9} l3 7 M${100 + hs + 5} ${y + 9} l-3 7" stroke="${suitB}" stroke-width="2" fill="none"/>`;
+    if (heat === 0) {
+      wear = `
+        <path d="M${L(shW - 1)} ${Y.shoulder + 2} C${L(waistW + 10)} ${Y.bust} ${L(waistW - 1)} ${Y.waist - 10} ${L(waistW - 1)} ${Y.waist + 6} L${R(waistW - 1)} ${Y.waist + 6} C${R(waistW - 1)} ${Y.waist - 10} ${R(waistW + 10)} ${Y.bust} ${R(shW - 1)} ${Y.shoulder + 2} Q100 ${Y.shoulder - 8} ${L(shW - 1)} ${Y.shoulder + 2} Z"
+          fill="${suit}" stroke="${OUT}" stroke-width="2.6" stroke-linejoin="round"/>
+        <path d="M${L(shW - 5)} ${Y.shoulder + 7} Q100 ${Y.shoulder - 2} ${R(shW - 5)} ${Y.shoulder + 7} L${R(shW - 9)} ${Y.shoulder + 16} Q100 ${Y.shoulder + 8} ${L(shW - 9)} ${Y.shoulder + 16} Z" fill="${suitB}"/>
+        ${trunks(Y.hip - 12)}`;
+    } else if (heat === 1) {
+      wear = `
+        <path d="M${L(shW - 1)} ${Y.shoulder + 2} C${L(shW + 3)} 170 ${L(waistW + 9)} 200 ${L(waistW + 2)} ${Y.hip - 12} L${L(waistW - 7)} ${Y.hip - 12} C${L(waistW - 3)} 198 ${L(shW * 0.55)} 152 ${100 - 11} ${Y.shoulder - 5} Z" fill="${suit}" stroke="${OUT}" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M${R(shW - 1)} ${Y.shoulder + 2} C${R(shW + 3)} 170 ${R(waistW + 9)} 200 ${R(waistW + 2)} ${Y.hip - 12} L${R(waistW - 7)} ${Y.hip - 12} C${R(waistW - 3)} 198 ${R(shW * 0.55)} 152 ${100 + 11} ${Y.shoulder - 5} Z" fill="${suit}" stroke="${OUT}" stroke-width="2.4" stroke-linejoin="round"/>
+        ${trunks(Y.hip - 8)}`;
+    } else {
+      wear = `
+        <path d="M90 118 Q100 132 110 118" stroke="#e8d8b0" stroke-width="3" fill="none"/>
+        <path d="M97 128 L100 136 L103 128 Z" fill="#fff8e7" stroke="${OUT}" stroke-width="1.4"/>
+        ${trunks(Y.hip + 2)}`;
+    }
+  }
+
+  return neck + body + chest + wear + arms;
+}
+
+// ---------- face ----------
+function stickerEye(cx, side, accent, skin) {
+  const s = side === 'l' ? -1 : 1;
+  return `
+    <g>
+      <path d="M${cx - 9.5} 72 Q${cx} 63.5 ${cx + 9.5} 72 Q${cx} 80.5 ${cx - 9.5} 72 Z" fill="#fff" stroke="${OUT}" stroke-width="2.4"/>
+      <circle cx="${cx}" cy="73" r="5.8" fill="${accent}" stroke="${shade(accent, -70)}" stroke-width="1.4"/>
+      <circle class="p-pupil" cx="${cx}" cy="73" r="2.7" fill="#1c1c20"/>
+      <path class="p-heartpupil" d="M${cx} 71 c-1.7 -2.6 -5.4 -1.4 -5.4 1.6 c0 2.6 5.4 5.8 5.4 5.8 s5.4 -3.2 5.4 -5.8 c0 -3 -3.7 -4.2 -5.4 -1.6 Z" fill="#ff2d6f" opacity="0"/>
+      <circle cx="${cx - 2.2}" cy="70.6" r="1.9" fill="#fff"/>
+      <circle cx="${cx + 2.6}" cy="75.4" r="1" fill="#fff" opacity="0.85"/>
+      <path d="M${cx + s * 9} 71.5 L${cx + s * 16} 65.5 L${cx + s * 7.5} 67.5 Z" fill="${OUT}"/>
+      <path d="M${cx - 9.5} 70.5 Q${cx} 64.5 ${cx + 9.5} 70.5" stroke="${OUT}" stroke-width="2.2" fill="none"/>
+      <rect class="p-lid" x="${cx - 10}" y="62.5" width="20" height="0" rx="3" fill="${skin}"/>
+      <g class="p-blinklids" fill="${skin}">
+        <rect x="${cx - 10}" y="61" width="20" height="24" rx="8"/>
+      </g>
     </g>`;
 }
 
 export function portraitSVG(c, uid, tier = 0) {
+  const m = c.measurements || { bust: 1, waist: 0.8, hips: 1.1, sh: 1, pose: 'square', lips: 1, lashes: true, beautyMark: false };
   const skin = SKIN_TONES[c.look.skin];
-  const skinD = shade(skin, -30);
-  const hair = HAIR_COLORS[c.look.hairColor];
-  const hairD = shade(hair, -26);
-  const hairL = shade(hair, 40);
-  const eye = EYE_COLORS[c.look.eyes];
-  const eyeL = shade(eye, 60);
+  const skinD = shade(skin, -26);
+  const accent = ACCENTS[c.look.accent ?? 0];
+  const root = shade(HAIR_COLORS[c.look.hairColor], -46);
   const suitB = SUIT_COLORS[c.look.suitB];
-  const acc = c.look.accessory;
   const heat = heatLevel(c, tier);
+  const acc = c.look.accessory;
 
   const accessory =
-    acc === 'flower' ? `<g><circle cx="140" cy="80" r="9" fill="#ff6b9d"/><circle cx="140" cy="80" r="3.5" fill="#ffd166"/></g>` :
-    acc === 'shades' ? `<rect x="66" y="58" width="68" height="10" rx="5" fill="#222" opacity="0.85"/>` :
-    acc === 'hoops'  ? `<g stroke="#ffd166" stroke-width="2.5" fill="none"><circle cx="60" cy="122" r="7"/><circle cx="140" cy="122" r="7"/></g>` :
-    acc === 'choker' ? `<rect x="88" y="152" width="24" height="6" rx="3" fill="${suitB}"/>` :
-    acc === 'cap'    ? `<path d="M60 70 C64 50 136 50 140 70 L150 74 L140 79 C130 64 70 64 60 79 Z" fill="${suitB}"/>` :
-    acc === 'stud'   ? `<circle cx="60" cy="120" r="3" fill="#ffd166"/>` : '';
+    acc === 'flower' ? `<g><circle cx="132" cy="52" r="8" fill="#ff6b9d" stroke="${OUT}" stroke-width="2.2"/><circle cx="132" cy="52" r="3" fill="#ffd166"/></g>` :
+    acc === 'shades' ? `<rect x="70" y="46" width="60" height="9" rx="4.5" fill="#222" stroke="${OUT}" stroke-width="2"/>` :
+    acc === 'hoops'  ? `<g stroke="#ffd166" stroke-width="2.5" fill="none"><circle cx="64" cy="94" r="6"/><circle cx="136" cy="94" r="6"/></g>` :
+    acc === 'choker' ? `<rect x="89" y="110" width="22" height="6" rx="3" fill="${suitB}" stroke="${OUT}" stroke-width="1.8"/>` :
+    acc === 'cap'    ? `<path d="M64 50 C68 32 132 32 136 50 L146 54 L136 59 C126 44 74 44 64 59 Z" fill="${suitB}" stroke="${OUT}" stroke-width="2.4"/>` :
+    acc === 'stud'   ? `<circle cx="64" cy="92" r="2.6" fill="#ffd166" stroke="${OUT}" stroke-width="1.4"/>` : '';
 
   const ahoge = AHOGE[c.look.hairStyle]
-    ? `<path class="p-ahoge" d="M100 56 C96 44 108 38 104 28 C112 36 106 48 104 56 Z" fill="${hair}"/>` : '';
+    ? `<path d="M100 40 C95 28 108 22 103 12 C112 20 106 32 104 40 Z" fill="${accent}" stroke="${OUT}" stroke-width="2"/>` : '';
+
+  const e = EMOTIONS.neutral;
+  const heart = (x, y, s, fill) =>
+    `<path class="tw" d="M${x} ${y} c${-2.6 * s} ${-3.8 * s} ${-8 * s} ${-2.2 * s} ${-8 * s} ${2.4 * s} c0 ${3.8 * s} ${8 * s} ${8.6 * s} ${8 * s} ${8.6 * s} s${8 * s} ${-4.8 * s} ${8 * s} ${-8.6 * s} c0 ${-4.6 * s} ${-5.4 * s} ${-6.2 * s} ${-8 * s} ${-2.4 * s} Z" fill="${fill}" stroke="#fff" stroke-width="2.4"/>`;
+  const sparkle = (x, y, r) =>
+    `<path class="tw tw-1" d="M${x} ${y - r} L${x + r * 0.28} ${y - r * 0.28} L${x + r} ${y} L${x + r * 0.28} ${y + r * 0.28} L${x} ${y + r} L${x - r * 0.28} ${y + r * 0.28} L${x - r} ${y} L${x - r * 0.28} ${y - r * 0.28} Z" fill="${accent}" stroke="#fff" stroke-width="1.2"/>`;
+  const flourishes =
+    (heat >= 1 ? heart(170, 128, 1, '#ff5d8f') + heart(28, 176, 0.8, accent) : '') +
+    (heat >= 2 ? sparkle(32, 116, 7) + sparkle(174, 210, 5.5) : '');
 
   return `
-  <svg class="portrait heat-${heat}" viewBox="0 0 200 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Portrait of ${c.name}">
+  <svg class="portrait sticker heat-${heat}" viewBox="0 0 200 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Portrait of ${c.name}">
     <defs>
-      <clipPath id="clip-${uid}"><rect x="0" y="0" width="200" height="260" rx="18"/></clipPath>
-      <linearGradient id="iris-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${shade(eye, -50)}"/><stop offset="55%" stop-color="${eye}"/><stop offset="100%" stop-color="${eyeL}"/>
+      <clipPath id="clip-${uid}"><rect x="0" y="0" width="200" height="300" rx="18"/></clipPath>
+      <filter id="stk-${uid}" x="-15%" y="-10%" width="130%" height="120%">
+        <feMorphology in="SourceAlpha" operator="dilate" radius="3" result="dl"/>
+        <feFlood flood-color="#ffffff"/>
+        <feComposite in2="dl" operator="in" result="ring"/>
+        <feMerge><feMergeNode in="ring"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <linearGradient id="hg-${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${root}"/><stop offset="42%" stop-color="${root}"/><stop offset="100%" stop-color="${accent}"/>
       </linearGradient>
-      <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#fff" stop-opacity="0"/><stop offset="45%" stop-color="#fff" stop-opacity="0.25"/><stop offset="100%" stop-color="#fff" stop-opacity="0"/>
-      </linearGradient>
+      <radialGradient id="blg-${uid}" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ff7096" stop-opacity="0.8"/><stop offset="100%" stop-color="#ff7096" stop-opacity="0"/>
+      </radialGradient>
     </defs>
     <g clip-path="url(#clip-${uid})">
-      ${backdrop(uid, heat)}
-      <g class="p-sway">
-        <path d="${HAIR_BACK[c.look.hairStyle]}" fill="${hairD}"/>
-      </g>
-      <g class="p-breathe">
-        ${torso(c, heat)}
-      </g>
-      <g class="p-head">
-        <!-- anime head: round crown, tapered chin -->
-        <path d="M57 96 C57 58 143 58 143 96 C143 122 126 146 100 154 C74 146 57 122 57 96 Z" fill="${skin}"/>
-        <path d="M57 96 C57 58 143 58 143 96 C143 100 142 104 141 108 L59 108 C58 104 57 100 57 96 Z" fill="${skin}"/>
-        <!-- brows -->
-        <g class="p-brows" stroke="${hairD}" stroke-width="3" stroke-linecap="round" fill="none">
-          <path d="M68 86 Q80 80 92 84"/>
-          <path d="M108 84 Q120 80 132 86"/>
+      ${backdrop(uid, heat, accent)}
+      <g filter="url(#stk-${uid})">
+        <g class="p-sway">
+          <path d="${HAIR_BACK[c.look.hairStyle]}" fill="url(#hg-${uid})" stroke="${OUT}" stroke-width="3" stroke-linejoin="round"/>
         </g>
-        ${animeEye(80, eye, uid)}
-        ${animeEye(120, eye, uid)}
-        <!-- heavy top lash lines -->
-        <g stroke="#191919" stroke-width="3.4" stroke-linecap="round" fill="none">
-          <path d="M68 100 Q80 90 92 100"/><path d="M108 100 Q120 90 132 100"/>
-          <path d="M66 101 l-4 -3 M134 101 l4 -3" stroke-width="2.6"/>
+        <g class="p-breathe">
+          ${figure(c, heat, m, uid)}
         </g>
-        <!-- lids (droop) + blink -->
-        <g fill="${skin}">
-          <rect class="p-lid" x="66" y="90" width="28" height="0" rx="5"/>
-          <rect class="p-lid" x="106" y="90" width="28" height="0" rx="5"/>
-        </g>
-        <g class="p-blinklids" fill="${skin}">
-          <rect x="66" y="92" width="28" height="28" rx="9"/>
-          <rect x="106" y="92" width="28" height="28" rx="9"/>
-        </g>
-        <!-- tiny anime nose -->
-        <path d="M99 119 L101 123" stroke="${skinD}" stroke-width="2" stroke-linecap="round"/>
-        <!-- blush: soft pad + anime stripes -->
-        <g class="p-blush" opacity="0.2">
-          <ellipse cx="72" cy="122" rx="10" ry="5.5" fill="#ff7096" opacity="0.55"/>
-          <ellipse cx="128" cy="122" rx="10" ry="5.5" fill="#ff7096" opacity="0.55"/>
-          <g stroke="#e0517c" stroke-width="1.6" stroke-linecap="round">
-            <path d="M66 119 l7 6 M72 117 l7 6 M78 115 l7 6"/>
-            <path d="M120 115 l7 6 M126 117 l7 6 M132 119 l7 6"/>
+        <g class="p-head">
+          <circle cx="66" cy="78" r="6" fill="${skin}" stroke="${OUT}" stroke-width="2.4"/>
+          <circle cx="134" cy="78" r="6" fill="${skin}" stroke="${OUT}" stroke-width="2.4"/>
+          <path d="M67 64 C67 36 133 36 133 64 C133 88 121 102 100 108 C79 102 67 88 67 64 Z" fill="${skin}" stroke="${OUT}" stroke-width="3"/>
+          <path d="M121 86 C115 97 106 103 100 105.5 C111 103.5 121 95 125 82 Z" fill="${skinD}" opacity="0.55"/>
+          <g class="p-brows" fill="${OUT}">
+            <path d="M74 59 Q84 53.5 93 57.5 L93 61 Q84 58 75 62.5 Z"/>
+            <path d="M107 57.5 Q116 53.5 126 59 L125 62.5 Q116 58 107 61 Z"/>
+          </g>
+          ${stickerEye(84, 'l', accent, skin)}
+          ${stickerEye(116, 'r', accent, skin)}
+          <path d="M100 82.5 L102.5 87" stroke="${OUT}" stroke-width="2.2" stroke-linecap="round"/>
+          <g class="p-blush" opacity="${e.blush}">
+            <ellipse cx="76" cy="84" rx="8.5" ry="5" fill="url(#blg-${uid})"/>
+            <ellipse cx="124" cy="84" rx="8.5" ry="5" fill="url(#blg-${uid})"/>
+            <g stroke="#e0517c" stroke-width="1.5" stroke-linecap="round" opacity="0.8">
+              <path d="M71 82 l5 4.5 M76 80.5 l5 4.5"/>
+              <path d="M119 80.5 l5 4.5 M124 82 l5 4.5"/>
+            </g>
+          </g>
+          <path class="p-mouth" d="${e.mouth}" stroke="${OUT}" stroke-width="${2.6 * m.lips}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <path class="p-teeth" d="M90.5 94 Q100 98.5 109.5 94 L108.5 96.2 Q100 100 91.5 96.2 Z" fill="#fff" opacity="0"/>
+          ${m.beautyMark ? `<circle cx="111.5" cy="90" r="1.4" fill="${shade(skin, -70)}"/>` : ''}
+          <g class="p-sway">
+            <path d="${HAIR_FRONT[c.look.hairStyle]}" fill="url(#hg-${uid})" stroke="${OUT}" stroke-width="3" stroke-linejoin="round"/>
+            <ellipse cx="86" cy="46" rx="10" ry="3.6" fill="#fff" opacity="0.65" transform="rotate(-12 86 46)"/>
+            ${ahoge}
+            ${accessory}
           </g>
         </g>
-        <path class="p-mouth" d="${EMOTIONS.neutral.mouth}" stroke="#c2405e" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <!-- bangs + shine + ahoge + accessory -->
-        <g class="p-sway">
-          <path d="${HAIR_FRONT[c.look.hairStyle]}" fill="${hair}"/>
-          <path d="M64 78 Q100 60 136 78 Q100 68 64 78 Z" fill="${hairL}" opacity="0.65"/>
-          ${ahoge}
-          ${accessory}
-        </g>
       </g>
+      ${flourishes}
     </g>
   </svg>`;
 }
@@ -303,30 +368,52 @@ export function setEmotion(container, emotion) {
   const svg = container.querySelector('svg.portrait');
   if (!svg) return;
   const mouth = svg.querySelector('.p-mouth');
+  const teeth = svg.querySelector('.p-teeth');
   const blush = svg.querySelector('.p-blush');
   const brows = svg.querySelector('.p-brows');
-  const lids = svg.querySelectorAll('.p-lid');
   if (mouth) {
     mouth.setAttribute('d', e.mouth);
-    mouth.setAttribute('fill', e.mouth.includes('Z') ? '#e8607e' : 'none');
+    mouth.setAttribute('fill', e.mouth.includes('Z') ? '#7c3644' : 'none');
   }
+  if (teeth) teeth.setAttribute('opacity', e.teeth ? '1' : '0');
   if (blush) blush.setAttribute('opacity', e.blush);
   if (brows) brows.style.transform = `translateY(${e.brow}px)`;
-  lids.forEach(l => l.setAttribute('height', String(28 * e.lids)));
+  svg.querySelectorAll('.p-lid').forEach(l => l.setAttribute('height', String(15 * e.lids)));
   svg.querySelectorAll('.p-pupil').forEach(p => p.setAttribute('opacity', e.pupil === 'heart' ? '0' : '1'));
   svg.querySelectorAll('.p-heartpupil').forEach(p => p.setAttribute('opacity', e.pupil === 'heart' ? '1' : '0'));
 }
 
+// Confidence over shyness: the emotive canon is smug/teasing/cheerful.
 export function emotionFor(c, tier = 0) {
   if (c.partner) return 'sultry';
   if (c.mood <= -2) return 'annoyed';
   if (c.mood === -1) return 'sad';
   if (tier >= 2 && c.desire >= 70) return 'sultry';
   if (c.desire >= 60) return 'love';
-  if (c.desire >= 40) return 'shy';
+  if (c.desire >= 40) return c.archetype === 'shy' ? 'shy' : 'teasing';
   if (c.affection >= 55) return 'happy';
-  if (c.affection >= 30) return 'smirk';
+  if (c.affection >= 30) return 'smug';
   return 'neutral';
+}
+
+// A prompt for any generative-image provider the player wires up themselves
+// (window.BCB_PORTRAIT_PROVIDER). Encodes the Sticker-Pop style guide + this
+// character's genes. Keep outputs suggestive-swimwear, never explicit.
+export function describeCharacter(c, tier = 0) {
+  const heat = heatLevel(c, tier);
+  const accentName = ACCENT_NAMES[c.look.accent ?? 0];
+  const outfit = c.presentation === 'fem'
+    ? ['sporty one-piece swimsuit', 'classic bikini', 'daring string bikini'][heat]
+    : ['rash guard and boardshorts', 'open shirt and swim trunks', 'bare chest, shell necklace, low swim trunks'][heat];
+  const scene = ['sunny beach day', 'golden sunset beach', 'moonlit beach at night'][heat];
+  return [
+    'sticker-pop cartoon pin-up, modern western-anime hybrid, adult (21+),',
+    `${GENDER_LABELS[c.gender].toLowerCase()}, ${BODY_LABELS[c.body]} body, oversized rounded hips and thighs as dominant silhouette, small torso, long smooth limbs, tiny tapered hands with ${accentName} painted nails,`,
+    `two-tone ${c.look.hairStyle} hair with dark roots melting into vivid ${accentName}, large glossy ${accentName} iris, heavy-lidded confident expression,`,
+    `wearing ${outfit}, ${scene} background (flat, muted, darker than character),`,
+    'thick smooth dark-brown outlines, continuous white die-cut sticker stroke around silhouette, flat cel shading with one hard shadow tone and white specular shines, soft airbrush blush, floating white-outlined hearts, four-point sparkles,',
+    'flat 2D vector look, no gradients except hair melt and blush, no realistic detail, suggestive but safe-for-work swimwear pin-up',
+  ].join(' ');
 }
 
 // Floating heart burst over an element (feedback for good moves).
@@ -346,8 +433,8 @@ export function heartBurst(el, n = 6, symbol = '💗') {
 }
 
 // ---------- Finale scene ----------
-// The big finish: sunset dissolves to night, bonfire, the couple melts into a
-// kiss, hearts rise, fireworks pop — then a knowing fade to starlight.
+// Sunset dissolves to night, bonfire, the couple melts into a kiss, hearts
+// rise, fireworks pop — sticker-outlined, fade to starlight.
 export function finaleSVG(c) {
   const skin = SKIN_TONES[c.look.skin];
   const hair = HAIR_COLORS[c.look.hairColor];
@@ -363,6 +450,12 @@ export function finaleSVG(c) {
       <radialGradient id="fin-glow" cx="50%" cy="50%" r="50%">
         <stop offset="0%" stop-color="#ffd166" stop-opacity="0.9"/><stop offset="100%" stop-color="#ffd166" stop-opacity="0"/>
       </radialGradient>
+      <filter id="fin-stk" x="-20%" y="-20%" width="140%" height="140%">
+        <feMorphology in="SourceAlpha" operator="dilate" radius="2.5" result="dl"/>
+        <feFlood flood-color="#ffffff"/>
+        <feComposite in2="dl" operator="in" result="ring"/>
+        <feMerge><feMergeNode in="ring"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
     </defs>
     <rect width="400" height="300" fill="url(#fin-sky)"/>
     <circle cx="320" cy="90" r="26" fill="#ffd166">
@@ -386,8 +479,8 @@ export function finaleSVG(c) {
       </g>
       <circle r="34" cy="-6" fill="url(#fin-glow)" class="fin-flicker"/>
     </g>
-    <!-- the couple leans into a kiss -->
-    <g transform="translate(230 216)">
+    <!-- the couple leans into a kiss, sticker-outlined -->
+    <g transform="translate(230 216)" filter="url(#fin-stk)">
       <g class="fin-her">
         <path d="M-4 44 C-14 20 -12 4 -2 -6 C6 -12 10 -20 8 -28 A10 10 0 1 0 -6 -22 C-16 -10 -22 12 -16 44 Z" fill="#241a33"/>
         <path d="M-4 44 C-14 20 -12 4 -2 -6 C6 -12 10 -20 8 -28 A10 10 0 1 0 -6 -22 C-16 -10 -22 12 -16 44 Z" fill="${suit}" opacity="0.55"/>
@@ -400,7 +493,7 @@ export function finaleSVG(c) {
         <path d="M20 -34 C22 -43 37 -43 39 -33 C39 -28 36 -26 35 -22 C30 -27 21 -28 20 -34 Z" fill="#2b2118"/>
       </g>
       <g class="fin-kissheart" opacity="0">
-        <path d="M15 -46 c-3 -5 -11 -3 -11 3 c0 5 11 11 11 11 s11 -6 11 -11 c0 -6 -8 -8 -11 -3 Z" fill="#ff5d8f"/>
+        <path d="M15 -46 c-3 -5 -11 -3 -11 3 c0 5 11 11 11 11 s11 -6 11 -11 c0 -6 -8 -8 -11 -3 Z" fill="#ff5d8f" stroke="#fff" stroke-width="2"/>
       </g>
     </g>
   </svg>`;

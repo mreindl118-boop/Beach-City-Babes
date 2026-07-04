@@ -39,6 +39,22 @@ consenting.
 - **The big finish.** Max both meters and invite them to the Bonfire: a fully
   animated finale — sunset dissolve, firelight, the kiss, fireworks, hearts,
   and a knowing fade to sexual satisfaction in steam scenes of salacious actions.
+- **Hearts have wiring.** Every NPC is monogamous 💍 or polyamorous 💞
+  (discover it by asking). At the Dating tier someone will want the
+  "what are we?" talk: promise **exclusivity**, negotiate **open & honest**,
+  or dodge it (mono hearts notice). Two-timing a promise feeds the **gossip
+  mill** — public dates travel fast in a small beach town — and confrontations
+  offer apologize / come clean / lie, with ultimatums, second chances, and
+  scorched-earth breakups where the whole beach hears about it. Neglected
+  exclusive partners may stray and tearfully confess (forgive or walk).
+  Mutually-sparked poly metamours unlock **group hangouts** — and no, poly
+  NPCs aren't automatically into each other; chemistry is rolled and remembered.
+- **Sticker-Pop art.** Portraits are die-cut sticker cartoons: white outer
+  stroke around the silhouette, thick warm-brown outlines, flat cel shading,
+  two-tone hair melting from dark roots into a vivid accent color that also
+  drives the iris, nails, sparkles, and that character's speech-bubble color.
+  Bodies are parametric (continuous bust/waist/hip/shoulder genes + pose) —
+  no two silhouettes repeat, and hips own the frame.
 
 ## Play it
 
@@ -65,7 +81,21 @@ python3 tools/bump_version.py 0.2.0
 git commit -am "release 0.2.0" && git push
 ```
 
-### Real APK
+### Alpha APK from GitHub Releases
+
+Every `v*` tag triggers `.github/workflows/android-apk.yml`, which wraps the
+game in Capacitor, stamps the 🍑 icon, builds a **debug APK** on the CI
+runner, and attaches it to a GitHub Release (marked pre-release). Grab the
+newest one from the repo's **Releases** page and sideload it ("install from
+unknown sources"). Ship a new one with:
+
+```bash
+python3 tools/bump_version.py 0.3.0-alpha
+git commit -am "release 0.3.0-alpha"
+git tag v0.3.0-alpha && git push && git push --tags
+```
+
+### Store-grade APK
 
 Because the PWA is the app, the recommended APK is a **Trusted Web Activity**
 wrapper via [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap):
@@ -95,7 +125,21 @@ WebView; the auto-update toast still functions since the game polls
 | `tools/make_icons.py` | Regenerates the 🍑 icon PNGs (Pillow) |
 | `tools/bump_version.py` | One-command release bump |
 
+## Generated portraits (optional, bring your own backend)
+
+The SVG portraits are the default, but the pipeline accepts generated images:
+set `window.BCB_PORTRAIT_PROVIDER = async (prompt, character, heat) => dataURL`
+before the game boots (e.g. a local Stable Diffusion WebUI endpoint) and each
+character's portrait is replaced per heat tier, cached in memory for the
+session. The `prompt` argument comes from `describeCharacter()` in
+`js/art.js`, which encodes the Sticker-Pop style guide plus that character's
+genes. Keep your provider's outputs swimwear-suggestive — the game's tone
+ceiling applies to art too.
+
 ## Content rating
 
-Mature 17+/18+: innuendo, suggestive themes, drug and alcohol references, scandalous
-swimwear. Features explicit sexual content, explicit sexual nudity in the art.
+Mature 17+/18+: innuendo, steamy suggestive themes, relationship drama
+(cheating, jealousy, breakups), drug and alcohol references, scandalous swimwear.
+Features explicit sexual content, explicit sexual nudity in the art.
+*(Maintainer's note: the shipped code is suggestive-only — see the project
+chat log; this description reflects the repo owner's intended direction.)*

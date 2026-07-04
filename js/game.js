@@ -4,19 +4,24 @@ import {
   GIFTS, ACTIVITIES, ROLES, GENDER_LABELS, BODY_LABELS, PRONOUN_SETS,
   FINALE_MIN_AFF, FINALE_MIN_DES, tierFor, tierLabel, ARCHETYPES,
   STAT_DEFS, BOOSTS, HUSTLES, TEXT_KINDS, TEXTS_PER_NPC_PER_DAY,
+  REL_LABELS, AGREEMENT_LABELS, GROUP_SCENES, GROUP_HANGOUT,
 } from './data.js';
 import {
   generateCharacter, archetypeOf, quirkOf, pronounsOf, isInterested,
   clampStats, dailyTick, rollDesire, currentDesireOf, ebbDesire,
+  npcChemistry, ensureMeasurements, ACCENTS,
 } from './characters.js';
 import {
   portraitSVG, setEmotion, emotionFor, heartBurst, heatLevel,
-  finaleSVG, spawnFireworks,
+  finaleSVG, spawnFireworks, describeCharacter, shade,
 } from './art.js';
 import {
   availableMoves, playerLineFor, resolveMove, giftReaction,
   dateNarration, dateReaction, proactiveText, greeting, meetLine,
-  textExchange,
+  textExchange, fill,
+  dtrOpen, DTR_CHOICES, resolveDTR,
+  confrontOpen, CONFRONT_CHOICES, resolveConfront, resolveUltimatum,
+  strayOpen, STRAY_CHOICES, resolveStray, groupAfterline,
 } from './dialogue.js';
 import { VERSION, BUILD } from './version.js';
 
@@ -71,6 +76,18 @@ function migrate(data) {
   const p = data.player;
   p.stats ??= { ...ROLE_STATS[p.role] };
   p.mojo ??= 0; p.inv ??= {}; p.buffs ??= {}; p.textsSent ??= {};
+  for (const c of data.npcs ?? []) {
+    c.relStyle ??= (c.id.charCodeAt(0) % 5 < 3 ? 'mono' : 'poly'); // stable-ish for old saves
+    c.agreement ??= c.partner ? 'exclusive' : 'none';
+    c.dtrDeflects ??= 0; c.guilt ??= 0; c.suspicion ??= 0; c.strikes ??= 0;
+    c.betrayed ??= false; c.loyal ??= false;
+    c.pendingConfront ??= false; c.pendingCheatConfess ??= false; c.pendingDTR ??= false;
+    c.chem ??= {};
+    c.known.rel ??= false;
+    c.spark ??= 0;
+    c.measurements ??= null;
+    c.look.accent ??= c.id.charCodeAt(0) % ACCENTS.length;
+  }
   return data;
 }
 
@@ -190,6 +207,7 @@ function startGame() {
   const c = active();
   if (!(S.logs[c.id]?.length)) npcSay(greeting(c, playerForDialogue(), rng));
   else renderLog();
+  maybeScene(c);
   flushTextsBadge();
 }
 
@@ -223,10 +241,16 @@ function renderChar(forcePortrait = false) {
   const interested = isInterested(c, playerForDialogue());
 
   if (forcePortrait || heat !== lastHeat) {
-    $('#portrait-box').innerHTML = portraitSVG(c, `u${uidCounter++}`, tier);
+    ensureMeasurements(c, rng);
+    renderPortrait(c, tier, heat);
     lastHeat = heat;
   }
   setEmotion($('#portrait-box'), emotionFor(c, tier));
+
+  // accent-color coordination: the NPC's speech bubbles wear their hair accent
+  const accent = ACCENTS[c.look.accent ?? 0];
+  document.documentElement.style.setProperty('--npc-accent', accent);
+  document.documentElement.style.setProperty('--npc-accent-bg', shade(accent, -90));
 
   $('#char-name').textContent = `${c.name}, ${c.age}`;
   $('#char-chips').innerHTML = [
@@ -235,6 +259,8 @@ function renderChar(forcePortrait = false) {
     `<span class="chip mini">${BODY_LABELS[c.body]}</span>`,
     `<span class="chip mini arch">${arch.label}</span>`,
     `<span class="chip mini tier">${tierLabel(tier)}${c.partner ? ' 💘' : ''}</span>`,
+    c.known.rel ? `<span class="chip mini rel">${REL_LABELS[c.relStyle].chip}</span>` : '',
+    c.agreement !== 'none' ? `<span class="chip mini agree">${AGREEMENT_LABELS[c.agreement]}</span>` : '',
     c.known.type && !interested ? `<span class="chip mini friend">friends 🤝</span>` : '',
   ].join('');
 
@@ -253,10 +279,39 @@ function renderChar(forcePortrait = false) {
   facts.push(c.known.dislikes ? `🙅 hates ${arch.dislikes.join(', ')}` : '🙅 hates ???');
   facts.push(c.known.quirk ? `⭐ ${quirkOf(c).text}` : '⭐ ???');
   facts.push(c.known.type ? `💘 into: ${c.attractedTo.map(g => GENDER_LABELS[g]).join(', ')}` : '💘 type: ???');
+  facts.push(c.known.rel ? `${REL_LABELS[c.relStyle].chip} — ${REL_LABELS[c.relStyle].desc}` : '💞 relationship style: ???');
   $('#profile').innerHTML = facts.map(f => `<div class="fact">${f}</div>`).join('');
 
   const finaleReady = interested && !c.partner && c.affection >= FINALE_MIN_AFF && c.desire >= FINALE_MIN_DES;
   $('#btn-finale').classList.toggle('hidden', !finaleReady);
+}
+
+// Portrait pipeline: procedural sticker SVG by default. If the player wires
+// up window.BCB_PORTRAIT_PROVIDER = async (prompt, character, heat) => dataURL
+// (their own image-gen backend), generated art replaces the SVG per heat tier.
+const pendingPortraits = new Set();
+function renderPortrait(c, tier, heat) {
+  const key = `${c.id}:${heat}`;
+  window.BCB_PORTRAIT_CACHE ??= {};
+  const ext = window.BCB_PORTRAIT_CACHE[key];
+  if (ext) {
+    $('#portrait-box').innerHTML = `<img class="portrait-ext" alt="Portrait of ${c.name}" src="${ext}">`;
+    return;
+  }
+  $('#portrait-box').innerHTML = portraitSVG(c, `u${uidCounter++}`, tier);
+  const prov = window.BCB_PORTRAIT_PROVIDER;
+  if (typeof prov === 'function' && !pendingPortraits.has(key)) {
+    pendingPortraits.add(key);
+    Promise.resolve(prov(describeCharacter(c, tier), c, heat))
+      .then(url => {
+        if (url) {
+          window.BCB_PORTRAIT_CACHE[key] = url;
+          if (S?.activeId === c.id) { lastHeat = -1; renderChar(true); }
+        }
+      })
+      .catch(() => {})
+      .finally(() => pendingPortraits.delete(key));
+  }
 }
 
 function log(who, text) {
@@ -307,12 +362,190 @@ function afterAction(emotion, good) {
   save();
 }
 
+// ---------------- gossip mill / cheating ----------------
+// A romantic act with `withC` registers against everyone else who'd care.
+// Beach City is a small town: public venues talk, and the more people you
+// know, the faster word travels.
+function registerRomance(withC, pub = 0.3, extraIds = []) {
+  const skip = new Set([withC.id, ...extraIds]);
+  for (const y of S.npcs) {
+    if (skip.has(y.id)) continue;
+    const t = tierFor(y);
+    const cares =
+      y.agreement === 'exclusive' ? true :
+      y.agreement === 'open' ? false :
+      t >= 2; // dating-but-undefined still stings, poly included (they hate sneaking)
+    if (!cares) continue;
+    y.guilt = (y.guilt ?? 0) + 1;
+    const p = Math.min(0.5, (0.10 + 0.18 * pub) * (1 + 0.05 * Math.max(0, S.npcs.length - 2)));
+    if (rng.chance(p) && !y.pendingConfront) {
+      y.suspicion = (y.suspicion ?? 0) + 1;
+      y.pendingConfront = true;
+      S.texts.push({
+        npcId: y.id, read: false, day: S.player.day,
+        text: rng.pick(['We need to talk. Tonight. Not over text.', 'Interesting things reach my ears, {0}. Come see me.', 'You. Me. A conversation. Soon. 🙂 (the 🙂 is loadbearing)'])
+          .replace('{0}', S.player.name),
+      });
+    }
+  }
+  flushTextsBadge();
+}
+
+// Public blowups echo: friends warn each other about you.
+function warnOthers(about) {
+  for (const y of S.npcs) {
+    if (y.id === about.id || tierFor(y) < 1) continue;
+    const judgy = y.relStyle === 'mono' ? 6 : 3;
+    y.affection = Math.max(0, y.affection - judgy);
+    y.mood = Math.max(-2, y.mood - 1);
+    S.texts.push({
+      npcId: y.id, read: false, day: S.player.day,
+      text: `Heard what happened with ${about.name}. Not a great look, ${S.player.name}. 😕`,
+    });
+  }
+  flushTextsBadge();
+}
+
+// ---------------- relationship scenes ----------------
+// Pending drama plays out the moment you're face to face.
+function maybeScene(c) {
+  if (c.pendingConfront) return sceneConfront(c);
+  if (c.pendingCheatConfess) return sceneStray(c);
+  if (c.pendingDTR) return sceneDTR(c, true);
+  return false;
+}
+
+function presentChoices(choices, handler) {
+  $('#choices').innerHTML = choices.map(ch =>
+    `<button class="btn choice warm" data-scene="${ch.id}">${ch.label}</button>`).join('');
+  $('#choices').querySelectorAll('[data-scene]').forEach(b => b.onclick = () => {
+    $('#choices').innerHTML = '';
+    handler(b.dataset.scene);
+  });
+}
+
+function sceneConfront(c, preemptive = false) {
+  if (!preemptive) npcSay(confrontOpen(c, playerForDialogue(), rng));
+  const choices = preemptive ? CONFRONT_CHOICES.filter(ch => ch.id !== 'deny') : CONFRONT_CHOICES;
+  presentChoices(choices, choice => {
+    const r = resolveConfront(c, playerForDialogue(), choice, rng, { preemptive });
+    applyDelta(c, r.dAff, r.dDes);
+    npcSay(r.npcText);
+    if (r.outcome === 'ultimatum') {
+      presentChoices([
+        { id: 'them', label: `💘 “It’s you, ${c.name}. Only you.”` },
+        { id: 'free', label: '🕊️ “I can’t promise that.”' },
+      ], sub => {
+        const u = resolveUltimatum(c, playerForDialogue(), sub === 'them', rng);
+        applyDelta(c, u.dAff, u.dDes);
+        npcSay(u.npcText);
+        if (sub === 'them') {
+          // clean break with everyone else — they hear it from you today
+          for (const y of S.npcs) {
+            if (y.id === c.id) continue;
+            if (y.agreement !== 'none' || y.partner || tierFor(y) >= 2) {
+              y.agreement = 'none'; y.partner = false;
+              y.affection = Math.max(0, y.affection - 15);
+              y.mood = Math.max(-2, y.mood - 1);
+              y.guilt = 0; y.suspicion = 0; y.pendingConfront = false;
+              S.texts.push({
+                npcId: y.id, read: false, day: S.player.day,
+                text: `So you chose ${c.name}. Thanks for telling me yourself, at least. Be good to each other. 💔`,
+              });
+            }
+          }
+          flushTextsBadge();
+        } else {
+          warnOthers(c);
+        }
+        afterAction(u.emotion, sub === 'them');
+      });
+      afterAction(r.emotion, false);
+      return;
+    }
+    if (r.outcome === 'blowup') warnOthers(c);
+    afterAction(r.emotion, r.outcome === 'opened');
+  });
+  return true;
+}
+
+function sceneStray(c) {
+  npcSay(strayOpen(c, playerForDialogue(), rng));
+  presentChoices(STRAY_CHOICES, choice => {
+    const r = resolveStray(c, playerForDialogue(), choice, rng);
+    applyDelta(c, r.dAff, r.dDes);
+    npcSay(r.npcText);
+    afterAction(r.emotion, choice === 'forgive');
+  });
+  return true;
+}
+
+function sceneDTR(c, npcInitiated) {
+  c.pendingDTR = false;
+  npcSay(dtrOpen(c, playerForDialogue(), rng, npcInitiated));
+  presentChoices(DTR_CHOICES, choice => {
+    const r = resolveDTR(c, playerForDialogue(), choice, rng);
+    applyDelta(c, r.dAff, r.dDes);
+    npcSay(r.npcText);
+    afterAction(r.emotion, r.dAff > 5);
+  });
+  return true;
+}
+
+// Group hangout with two mutually-sparked poly flames.
+function groupCandidateFor(c) {
+  if (c.relStyle !== 'poly' || c.agreement !== 'open') return null;
+  return S.npcs.find(m =>
+    m.id !== c.id && m.agreement === 'open' && tierFor(m) >= 1 &&
+    isInterested(m, playerForDialogue()) && npcChemistry(c, m, rng)) || null;
+}
+
+function goGroupDate(c, m) {
+  S.player.coins -= GROUP_HANGOUT.cost;
+  advanceTime(GROUP_HANGOUT.hours);
+  const scene = rng.pick(GROUP_SCENES).replaceAll('{a}', c.name).replaceAll('{b}', m.name);
+  narrate(`💞 Group hangout: ${scene}.`);
+  for (const x of [c, m]) {
+    x.affection += GROUP_HANGOUT.aff;
+    x.desire += GROUP_HANGOUT.des;
+    x.lastSeenDay = S.player.day;
+    x._datedToday = true;
+    clampStats(x, playerForDialogue());
+  }
+  registerRomance(c, GROUP_HANGOUT.pub, [m.id]);
+  setTimeout(() => {
+    npcSay(groupAfterline(c, m, playerForDialogue(), rng));
+    S.texts.push({ npcId: m.id, read: false, day: S.player.day, text: groupAfterline(m, c, playerForDialogue(), rng) });
+    flushTextsBadge();
+    afterAction('laugh', true);
+  }, 600);
+}
+
 function doTalk() {
   const c = active();
+  if (maybeScene(c)) return; // pending drama outranks small talk
   const moves = availableMoves(c, playerForDialogue(), rng);
-  $('#choices').innerHTML = moves.map(m =>
+  const tier = tierFor(c);
+  let html = moves.map(m =>
     `<button class="btn choice" data-move="${m.type}">${m.label}</button>`).join('');
+  if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none') {
+    html += `<button class="btn choice warm" data-special="dtr">💕 Heart-to-heart</button>`;
+  }
+  if ((c.guilt ?? 0) > 0 && (c.agreement === 'exclusive' || tier >= 2)) {
+    html += `<button class="btn choice warm" data-special="confess">😳 Come clean</button>`;
+  }
+  $('#choices').innerHTML = html;
   $('#choices').querySelectorAll('[data-move]').forEach(b => b.onclick = () => doMove(b.dataset.move));
+  $('#choices').querySelectorAll('[data-special]').forEach(b => b.onclick = () => {
+    $('#choices').innerHTML = '';
+    if (b.dataset.special === 'dtr') {
+      playerSay('Hey... can we talk? About us, I mean.');
+      setTimeout(() => sceneDTR(c, false), 420);
+    } else {
+      playerSay('There’s something I need to tell you, and you deserve to hear it from me.');
+      setTimeout(() => sceneConfront(c, true), 420);
+    }
+  });
 }
 
 function doMove(move) {
@@ -326,6 +559,8 @@ function doMove(move) {
   if (r.success && (move === 'SPICY' || (move === 'FLIRT' && tierFor(c) >= 2))) {
     S.player.mojo = Math.min(20, S.player.mojo + 1);
   }
+  // open flirting feeds the gossip mill for anyone you've made promises to
+  if (r.success && ['FLIRT', 'SPICY', 'SERENADE'].includes(move)) registerRomance(c, 0.15);
   setTimeout(() => {
     npcSay(r.npcText);
     if (r.special === 'transShare') {
@@ -373,6 +608,7 @@ function giveGift(gift) {
   narrate(`You give ${c.name} the ${gift.name} ${gift.emoji}`);
   const r = giftReaction(c, playerForDialogue(), gift, rng);
   applyDelta(c, r.dAff, r.dDes);
+  if (gift.cat === 'spicy') registerRomance(c, 0.3);
   setTimeout(() => {
     npcSay(r.text);
     afterAction(r.emotion, r.quality === 'love' || r.quality === 'like');
@@ -381,8 +617,12 @@ function giveGift(gift) {
 
 function openDates() {
   const c = active();
+  const buddy = groupCandidateFor(c);
+  const groupOk = buddy && S.player.coins >= GROUP_HANGOUT.cost;
   const body = `
     <h3>🌴 Take ${c.name} out</h3>
+    ${buddy ? `<button class="btn choice warm" id="group-date" ${groupOk ? '' : 'disabled'} style="width:100%;margin-bottom:8px">
+      💞 Group hangout with ${buddy.name} (🪙 ${GROUP_HANGOUT.cost} · ${GROUP_HANGOUT.hours}h)</button>` : ''}
     <div class="shop-grid">
       ${ACTIVITIES.map(a => {
         const locked = c.affection < a.minAff;
@@ -396,6 +636,8 @@ function openDates() {
       }).join('')}
     </div>`;
   openModal(body);
+  const gd = $('#group-date');
+  if (gd) gd.onclick = () => { closeModal(); goGroupDate(c, buddy); };
   $('#modal-body').querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
     closeModal();
     goDate(ACTIVITIES.find(a => a.id === b.dataset.act));
@@ -412,6 +654,7 @@ function goDate(act) {
   const r = dateReaction(c, playerForDialogue(), act, rng);
   applyDelta(c, r.dAff, r.dDes);
   c._datedToday = true;
+  registerRomance(c, act.pub ?? 0.5);
   setTimeout(() => {
     npcSay(r.text);
     afterAction(r.emotion, r.dAff > 5);
@@ -568,6 +811,7 @@ function sendText(c, kind) {
   switchTo(c.id);
   log('me', `📱 ${r.out}`);
   applyDelta(c, r.dAff, r.dDes);
+  if (r.accepted && (kind === 'flirty' || kind === 'spicy')) registerRomance(c, 0.05);
   setTimeout(() => {
     npcSay(`📱 ${r.reply}`);
     if (kind === 'invite' && r.accepted) {
@@ -586,13 +830,30 @@ function doSleep() {
   for (const c of S.npcs) {
     const neglected = dailyTick(c, S.player.day, rng, pl);
     delete c._datedToday;
+    const tier = tierFor(c);
+    // relationship pressure: mono hearts at Dating tier want the Talk
+    if (c.relStyle === 'mono' && tier >= 2 && c.agreement === 'none'
+        && !c.pendingDTR && !c.pendingConfront && rng.chance(0.35)) {
+      c.pendingDTR = true;
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day, text: 'Hey... we should talk about us sometime soon. Nothing bad! Probably! 💭' });
+    }
+    // a neglected exclusive partner may stray — and will tell you
+    if (c.agreement === 'exclusive' && !c.loyal && neglected && c.mood <= -1
+        && !c.pendingCheatConfess && rng.chance(0.3)) {
+      c.pendingCheatConfess = true;
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day, text: 'Can we talk? It’s important. I’d rather say it to your face. 🥺' });
+    }
     // proactive texting
     let kind = null;
     if (c.partner && rng.chance(0.5)) kind = 'partner';
     else if (neglected && rng.chance(0.8)) kind = 'miss';
-    else if (tierFor(c) >= 1 && dated.length && !dated.includes(c.id) && rng.chance(0.3)) kind = 'jealous';
+    else if (tier >= 1 && dated.length && !dated.includes(c.id) && rng.chance(0.3)) {
+      // jealousy depends on wiring: open agreements get playful check-ins instead
+      kind = c.agreement === 'open' ? 'checkin' : c.relStyle === 'poly' && tier < 2 ? 'flirt' : 'jealous';
+    }
+    else if (c.agreement === 'open' && c.relStyle === 'poly' && rng.chance(0.2)) kind = 'metamour';
     else if (!c.desireHinted && c.currentDesire && rng.chance(0.6)) kind = 'desireHint';
-    else if (tierFor(c) >= 1 && rng.chance(0.35)) kind = 'flirt';
+    else if (tier >= 1 && rng.chance(0.35)) kind = 'flirt';
     if (kind) {
       const text = proactiveText(c, pl, rng, kind);
       if (text) S.texts.push({ npcId: c.id, text, read: false, day: S.player.day });
@@ -605,6 +866,7 @@ function doSleep() {
   narrate(`🌙 You sleep. Day ${S.player.day} dawns over Beach City.`);
   renderAll();
   flushTextsBadge();
+  maybeScene(active());
   save();
 }
 
@@ -688,6 +950,7 @@ function switchTo(id) {
   } else if (!(S.logs[id]?.length)) {
     npcSay(greeting(c, playerForDialogue(), rng));
   }
+  maybeScene(c); // pending drama meets you at the door
   flushTextsBadge();
   save();
 }
@@ -755,6 +1018,7 @@ function startFinale() {
 
 function doSleepAfterFinale() {
   const c = active();
+  registerRomance(c, 0.4); // bonfires have witnesses
   S.player.day += 1;
   S.player.hour = 10;
   narrate(`🌅 Day ${S.player.day}. You wake up grinning. ${c.name} is officially your flame. 💘 Hearts won: ${S.player.heartsWon}`);

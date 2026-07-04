@@ -145,7 +145,13 @@ h1 span { color: var(--gold); }
   animation: bubblein 0.25s ease;
 }
 @keyframes bubblein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.bubble.npc { background: #fff; align-self: flex-start; border-bottom-left-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+.bubble.npc {
+  background: var(--npc-accent-bg, #fff); color: var(--npc-bubble-ink, #fff);
+  align-self: flex-start; border-bottom-left-radius: 6px;
+  border: 2.5px solid #fff; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+}
+:root { --npc-bubble-ink: #fff; }
 .bubble.me { background: var(--pink); color: #fff; align-self: flex-end; border-bottom-right-radius: 6px; }
 .bubble.sys { background: rgba(51,32,44,0.75); color: #ffe9f1; align-self: center; font-size: 13px; font-style: italic; max-width: 92%; }
 
@@ -197,7 +203,7 @@ h1 span { color: var(--gold); }
 @keyframes sway { 0%,100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
 .p-head { animation: headtilt 6s ease-in-out infinite; transform-origin: 100px 140px; }
 @keyframes headtilt { 0%,100% { transform: rotate(0deg); } 30% { transform: rotate(1.2deg); } 70% { transform: rotate(-1.2deg); } }
-.p-blinklids rect { transform: scaleY(0); transform-origin: center 100px; transform-box: view-box; animation: blink 4.6s infinite; }
+.p-blinklids rect { transform: scaleY(0); transform-origin: 50% 50%; transform-box: fill-box; animation: blink 4.6s infinite; }
 @keyframes blink { 0%, 94%, 100% { transform: scaleY(0); } 96%, 98% { transform: scaleY(1); } }
 .p-brows { transition: transform 0.3s ease; }
 .p-mouth { transition: d 0.3s ease; }
@@ -280,3 +286,7 @@ h1 span { color: var(--gold); }
 .roster-row.off { opacity: 0.45; cursor: not-allowed; }
 .roster-row span:first-child { font-size: 20px; }
 @media (max-width: 600px) { .stats-strip { display: none; } }
+
+/* ---------- sticker-pop additions ---------- */
+.portrait-ext { width: 100%; display: block; border-radius: 18px; }
+#portrait-box svg.sticker { filter: drop-shadow(0 4px 10px rgba(0,0,0,0.18)); }

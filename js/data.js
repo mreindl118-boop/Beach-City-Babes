@@ -149,34 +149,34 @@ export const GIFTS = [
 // ---------- Activities ----------
 // heatScene: spicier flavor text used at tier >= 2.
 export const ACTIVITIES = [
-  { id: 'walk',     name: 'Beach Walk',       cost: 0,  hours: 1, aff: 6,  des: 2,  minAff: 0,  emoji: '🚶',
+  { id: 'walk',     name: 'Beach Walk',       cost: 0,  hours: 1, pub: 0.5, aff: 6,  des: 2,  minAff: 0,  emoji: '🚶',
     scene: 'you two wander the shoreline, dodging waves and trading stories',
     heatScene: 'you walk the empty shoreline, {pos} fingers laced in yours, hips bumping on purpose' },
-  { id: 'smoothie', name: 'Smoothie Stand',   cost: 8,  hours: 1, aff: 7,  des: 3,  minAff: 0,  emoji: '🥤',
+  { id: 'smoothie', name: 'Smoothie Stand',   cost: 8,  hours: 1, pub: 0.7, aff: 7,  des: 3,  minAff: 0,  emoji: '🥤',
     scene: 'you split a mango-coconut smoothie, two straws',
     heatScene: 'one smoothie, two straws, and {sub} maintains eye contact the entire time' },
-  { id: 'arcade',   name: 'Boardwalk Arcade', cost: 15, hours: 2, aff: 9,  des: 4,  minAff: 10, emoji: '🕹️',
+  { id: 'arcade',   name: 'Boardwalk Arcade', cost: 15, hours: 2, pub: 0.8, aff: 9,  des: 4,  minAff: 10, emoji: '🕹️',
     scene: '{sub} destroys you at air hockey and gloats adorably',
     heatScene: '{sub} bets kisses on air hockey and loses on purpose. Twice.' },
-  { id: 'surf',     name: 'Surf Session',     cost: 20, hours: 2, aff: 8,  des: 8,  minAff: 15, emoji: '🏄',
+  { id: 'surf',     name: 'Surf Session',     cost: 20, hours: 2, pub: 0.6, aff: 8,  des: 8,  minAff: 15, emoji: '🏄',
     scene: 'salt spray, wipeouts, and {obj} laughing at yours',
     heatScene: 'wet skin, shared board, and {pos} hands steadying your waist far longer than technique requires' },
-  { id: 'sushi',    name: 'Sushi Date',       cost: 35, hours: 2, aff: 12, des: 6,  minAff: 20, emoji: '🍣',
+  { id: 'sushi',    name: 'Sushi Date',       cost: 35, hours: 2, pub: 0.7, aff: 12, des: 6,  minAff: 20, emoji: '🍣',
     scene: 'candlelight, sake, and {obj} stealing your last roll',
     heatScene: 'sake-warm and candlelit, {sub} feeds you the last roll from {pos} chopsticks, slow' },
-  { id: 'yoga',     name: 'Sunset Yoga',      cost: 18, hours: 1, aff: 8,  des: 10, minAff: 25, emoji: '🧘',
+  { id: 'yoga',     name: 'Sunset Yoga',      cost: 18, hours: 1, pub: 0.5, aff: 8,  des: 10, minAff: 25, emoji: '🧘',
     scene: 'partner poses at golden hour, very hands-on',
     heatScene: 'partner poses turn into an excuse to be pressed together, breathing in sync at golden hour' },
-  { id: 'dance',    name: 'Tiki Club Night',  cost: 30, hours: 3, aff: 10, des: 14, minAff: 35, emoji: '💃',
+  { id: 'dance',    name: 'Tiki Club Night',  cost: 30, hours: 3, pub: 0.9, aff: 10, des: 14, minAff: 35, emoji: '💃',
     scene: 'sweaty bass, close dancing, {pos} lips at your ear',
     heatScene: 'bass in your ribs, {pos} body moving against yours, lips grazing your ear with every whisper' },
-  { id: 'stars',    name: 'Stargazing',       cost: 5,  hours: 2, aff: 14, des: 10, minAff: 45, emoji: '🌌',
+  { id: 'stars',    name: 'Stargazing',       cost: 5,  hours: 2, pub: 0.15, aff: 14, des: 10, minAff: 45, emoji: '🌌',
     scene: 'a blanket, a thermos, and constellations you both invent',
     heatScene: 'one blanket, zero interest in stars — {sub} traces constellations on your palm instead' },
-  { id: 'midnight', name: 'Midnight Swim',    cost: 0,  hours: 2, aff: 10, des: 18, minAff: 55, emoji: '🌊',
+  { id: 'midnight', name: 'Midnight Swim',    cost: 0,  hours: 2, pub: 0.1, aff: 10, des: 18, minAff: 55, emoji: '🌊',
     scene: 'moonlit water, whispered dares, goosebumps that aren’t from the cold',
     heatScene: 'moonlit water up to your shoulders, {pos} legs finding yours beneath the surface, dares whispered against wet skin' },
-  { id: 'hottub',   name: 'Rooftop Hot Tub',  cost: 40, hours: 2, aff: 12, des: 22, minAff: 65, emoji: '♨️',
+  { id: 'hottub',   name: 'Rooftop Hot Tub',  cost: 40, hours: 2, pub: 0.25, aff: 12, des: 22, minAff: 65, emoji: '♨️',
     scene: 'steam, city lights, and very little distance between you',
     heatScene: 'steam curling off the water, {sub} drifts across the tub and settles in close enough to share a heartbeat' },
 ];
@@ -343,3 +343,23 @@ export const TEXT_KINDS = [
   { id: 'invite', label: '📍 “Come find me”', minTier: 1 },
 ];
 export const TEXTS_PER_NPC_PER_DAY = 2;
+
+// ---------- Relationship structure ----------
+export const REL_LABELS = {
+  mono: { chip: '💍 monogamous', desc: 'one-heart-at-a-time' },
+  poly: { chip: '💞 polyam', desc: 'many rooms in this heart' },
+};
+
+export const AGREEMENT_LABELS = {
+  none: '', exclusive: '🔒 exclusive with you', open: '🤝 open & honest',
+};
+
+// Group hangout narrations for compatible poly metamours (both your flames).
+export const GROUP_SCENES = [
+  'The three of you commandeer a firepit; {a} steals {b}’s fries, {b} retaliates via your shoulder as a shield, and somehow everyone wins',
+  '{a} and {b} tag-team roasting your karaoke song choice, then both demand a duet. It becomes a trio. Security is charmed but firm',
+  'Beach blanket, one sunset, three people, zero personal space. {a} claims your left arm. {b} annexes the right. You have never been happier to lose both arms',
+  'You three close down the tiki bar inventing a cocktail named after your group chat. The bartender writes it on the wall',
+];
+
+export const GROUP_HANGOUT = { cost: 20, hours: 3, aff: 9, des: 7, pub: 0.6 };

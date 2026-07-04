@@ -1,0 +1,8 @@
+{
+  "appId": "com.beachcity.babes",
+  "appName": "Beach City Babes",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#ff6a88"
+  }
+}
