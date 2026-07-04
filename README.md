@@ -99,4 +99,4 @@ WebView; the auto-update toast still functions since the game polls
 ## Content rating
 
 Mature 17+/18+: innuendo, suggestive themes, alcohol references, scandalous
-swimwear. No explicit sexual content, no nudity in the art.
+swimwear. Features explicit sexual content, explicit sexual nudity in the art.
