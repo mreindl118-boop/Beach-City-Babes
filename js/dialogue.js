@@ -1121,3 +1121,56 @@ export function chatPersona(c, player, recentLog) {
 function tierLabelSafe(c) {
   try { return ['strangers', 'flirting', 'dating', 'lovers'][tierFor(c)]; } catch { return 'strangers'; }
 }
+
+// ================= date offers can be refused =================
+// Asking someone out is a real ask. They weigh their mood, how well they know
+// you, their standards, your reputation, and — for intimate dates — the
+// relationship tier. A refusal stings and can dent your standing in town.
+export function dateOffer(c, player, act, rng) {
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng, { act: act.name.toLowerCase() });
+  if (!isInterested(c, player)) {
+    return { accepted: false, repHit: 0, affHit: -1, emotion: 'laugh',
+      line: fill(rng.pick([
+        'Aw, as friends? Sure. As a date? You’re barking up the wrong palm tree, {pet}.',
+        'That’s sweet but you’re not my flavor, remember? Rain check as buddies.',
+      ]), ctx) };
+  }
+  let p = 0.9
+    + (player.reputation ?? 0) / 220        // being well-liked in town helps
+    - Math.max(0, (act.minAff + 12 - c.affection)) / 55  // asking big too early
+    - (c.standards - 0.6) * 0.35
+    + c.mood * 0.12;
+  if (act.intimate) p -= 0.45 + Math.max(0, act.minTier - tier) * 0.2;
+  p = Math.max(0.08, Math.min(0.97, p));
+  if (rng.chance(p)) {
+    return { accepted: true, line: fill(rng.pick([
+      'Yes! God, finally. Give me two minutes to look devastating.',
+      'Took you long enough to ask. Obviously yes.',
+      'A date? With me? Bold. I respect it. Let’s go, {pet}.',
+    ]), ctx) };
+  }
+  // refusal — worse when you overreached or your reputation precedes you
+  const harsh = act.intimate || c.mood < 0 || (player.reputation ?? 0) < -20;
+  return {
+    accepted: false, emotion: harsh ? 'annoyed' : 'sad',
+    affHit: harsh ? -4 : -2, repHit: harsh ? -4 : -2,
+    line: fill(rng.pick(harsh ? [
+      'Wow, THAT’s the invite? Hard pass. And people talk, you know.',
+      'No. We are nowhere near that, and honestly you asking is a little telling.',
+      'Yeah... no. Read the room, {pet}. This is going in the group chat.',
+    ] : [
+      'Aw — not today. I’ve got a thing. Ask me again when it’s not so out of the blue?',
+      'Mm, I’m gonna say... not yet. Warm me up first, {pet}.',
+      'A rain check, if that’s okay? I barely know you.',
+    ]), ctx),
+  };
+}
+
+export function reputationLabel(rep) {
+  if (rep <= -40) return { txt: 'Notorious', emoji: '💀' };
+  if (rep <= -15) return { txt: 'Shady', emoji: '😬' };
+  if (rep < 15) return { txt: 'Unknown', emoji: '🙂' };
+  if (rep < 40) return { txt: 'Well-liked', emoji: '😊' };
+  return { txt: 'Beach Royalty', emoji: '👑' };
+}

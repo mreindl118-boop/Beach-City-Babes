@@ -23,7 +23,7 @@ import { mapSVG } from './mapart.js';
 import {
   resolveTyped, classifyChoice, chatPersona, giftReaction,
   dateNarration, dateReaction, proactiveText, greeting, meetLine,
-  textExchange, fill,
+  textExchange, fill, dateOffer, reputationLabel,
   dtrOpen, DTR_CHOICES, resolveDTR,
   confrontOpen, CONFRONT_CHOICES, resolveConfront, resolveUltimatum,
   strayOpen, STRAY_CHOICES, resolveStray, groupAfterline,
@@ -276,8 +276,9 @@ function renderTopbar() {
     S.player.buffs.scent ? '🌺' : '',
     S.player.buffs.outfit ? '🕶️' : '',
   ].join('');
+  const rep = reputationLabel(S.player.reputation ?? 0);
   $('#stats-strip').textContent =
-    `💬${st.charm} ✨${st.style} 💪${st.physique} 🔥${S.player.mojo} ${buffIcons}`;
+    `💬${st.charm} ✨${st.style} 💪${st.physique} 🔥${S.player.mojo} ${rep.emoji}${S.player.reputation} ${buffIcons}`;
 }
 
 function renderChar(forcePortrait = false) {
@@ -441,6 +442,7 @@ function registerRomance(withC, pub = 0.3, extraIds = []) {
 
 // Public blowups echo: friends warn each other about you.
 function warnOthers(about) {
+  adjustRep(-10); // a scene like this gets around
   for (const y of S.npcs) {
     if (y.id === about.id || tierFor(y) < 1) continue;
     const judgy = y.relStyle === 'mono' ? 6 : 3;
@@ -613,7 +615,13 @@ function arrive(loc, announce) {
     const pick = here.find(c => isInterested(c, playerForDialogue())) || here[0];
     if (pick) { S.activeId = pick.id; lastHeat = -1; }
   }
-  if (met) setTimeout(() => { switchTo(met.id); npcSay(meetLine(met, playerForDialogue(), rng)); }, 300);
+  if (met) {
+    // your reputation precedes you — beloved gets a warm start, notorious a wary one
+    const rep = S.player.reputation ?? 0;
+    met.affection = Math.max(0, Math.min(30, met.affection + Math.round(rep / 12)));
+    met.standards = Math.max(0.4, Math.min(1, met.standards - rep / 400));
+    setTimeout(() => { switchTo(met.id); npcSay(meetLine(met, playerForDialogue(), rng)); }, 300);
+  }
   renderAll();
   refreshChatBar();
   save();
@@ -736,6 +744,9 @@ async function npcReply(c, text) {
   if (r.success && (intent === 'SPICY' || (intent === 'FLIRT' && tierFor(c) >= 2)))
     S.player.mojo = Math.min(20, S.player.mojo + 1);
   if (r.success && ['FLIRT', 'SPICY', 'SERENADE'].includes(intent)) registerRomance(c, 0.15);
+  // crashing and burning in public (creepy line, walk-off, being a jerk) costs
+  // you standing around town — people talk
+  if (r.rejected || r.walk || intent === 'INSULT') adjustRep(-2);
   if (r.walk) c.walkedToday = true;
 
   setTimeout(() => {
@@ -832,19 +843,37 @@ function openDates() {
 
 function goDate(act) {
   const c = active();
+  // you have to ask first — and they can say no
+  narrate(`You ask ${c.name} out: ${act.emoji} ${act.name}.`);
+  const offer = dateOffer(c, playerForDialogue(), act, rng);
+  if (!offer.accepted) {
+    applyDelta(c, offer.affHit || 0, 0);
+    if (offer.repHit) adjustRep(offer.repHit);
+    if (offer.emotion === 'annoyed' && rng.chance(0.4)) c.mood = Math.max(-2, c.mood - 1);
+    setTimeout(() => { npcSay(offer.line); afterAction(offer.emotion || 'sad', false); }, 400);
+    return;
+  }
   let cost = act.cost;
   if (S.player.role === 'chef' && ['sushi', 'smoothie'].includes(act.id)) cost = Math.ceil(cost / 2);
   S.player.coins -= cost;
+  npcSay(offer.line);
   advanceTime(act.hours);
   narrate(`${act.emoji} ${act.name}: ${dateNarration(c, playerForDialogue(), act, rng)}.`);
   const r = dateReaction(c, playerForDialogue(), act, rng);
   applyDelta(c, r.dAff, r.dDes);
   c._datedToday = true;
+  adjustRep(2); // a good date out on the town lifts your standing
   registerRomance(c, act.pub ?? 0.5);
   setTimeout(() => {
     npcSay(r.text);
     afterAction(r.emotion, r.dAff > 5);
-  }, 500);
+  }, 700);
+}
+
+// Town-wide standing. Good dates and relationships raise it; getting caught,
+// creepy strikes, and blowups sink it. Gates how warily strangers greet you.
+function adjustRep(delta) {
+  S.player.reputation = Math.max(-100, Math.min(100, (S.player.reputation ?? 0) + delta));
 }
 
 function openHustle() {
@@ -998,6 +1027,8 @@ function sendText(c, kind) {
   log('me', `📱 ${r.out}`);
   applyDelta(c, r.dAff, r.dDes);
   if (r.accepted && (kind === 'flirty' || kind === 'spicy')) registerRomance(c, 0.05);
+  // a spicy text that lands badly is the kind of screenshot that travels
+  if (!r.accepted && kind === 'spicy') adjustRep(-3);
   setTimeout(() => {
     npcSay(`📱 ${r.reply}`);
     if (kind === 'invite' && r.accepted) {
@@ -1178,6 +1209,7 @@ function startFinale() {
 function doSleepAfterFinale() {
   const c = active();
   registerRomance(c, 0.4); // bonfires have witnesses
+  adjustRep(8); // winning a heart is good for the reputation
   S.player.day += 1;
   S.player.hour = 10;
   narrate(`🌅 Day ${S.player.day}. You wake up grinning. ${c.name} is officially your flame. 💘 Hearts won: ${S.player.heartsWon}`);
