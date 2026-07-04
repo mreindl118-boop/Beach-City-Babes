@@ -35,7 +35,7 @@ consenting.
   spicy (tier-gated), or a *come find me* that summons them in person.
 - **Heat escalates.** Relationship tiers (Strangers → Flirting → Dating →
   Lovers) unlock steamier dialogue banks, spicier gift reactions, more daring
-  outfits and sultrier poses in the art, and night-time backdrops.
+  outfits and sultrier poses in the art, and night-time backdrops and situations.
 - **The big finish.** Max both meters and invite them to the Bonfire: a fully
   animated finale — sunset dissolve, firelight, the kiss, fireworks, hearts,
   and a knowing fade to sexual satisfaction in steam scenes of salacious actions.
