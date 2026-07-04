@@ -4,8 +4,7 @@
 with animated 2D anime-style portraits, procedurally generated characters, and
 a seduction system with actual mechanics under the sunscreen.
 
-**Suggestive, never explicit** — the game runs hot on innuendo and fades to
-black at the peak. Everyone in Beach City is an adult and enthusiastically
+**Suggestive, very explicit** — the game runs hot on innuendo and dunks hard on explicit details. Everyone in Beach City is an adult and enthusiastically
 consenting.
 
 ## Design pillars
