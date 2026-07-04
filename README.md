@@ -38,7 +38,7 @@ consenting.
   outfits and sultrier poses in the art, and night-time backdrops.
 - **The big finish.** Max both meters and invite them to the Bonfire: a fully
   animated finale — sunset dissolve, firelight, the kiss, fireworks, hearts,
-  and a knowing fade to starlight.
+  and a knowing fade to sexual satisfaction in steam scenes of salacious actions.
 
 ## Play it
 
