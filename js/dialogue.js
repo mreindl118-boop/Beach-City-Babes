@@ -9,6 +9,7 @@ import {
   archetypeOf, quirkOf, pronounsOf, isInterested, roleChemistry,
   currentDesireOf, addMemory, clampStats,
 } from './characters.js';
+import { classify, topicLabel } from './nlu.js';
 
 // ---------- template filling ----------
 export function fill(tpl, ctx) {
@@ -24,6 +25,7 @@ export function ctxFor(c, player, rng, extra = {}) {
     sub: p.sub, obj: p.obj, pos: p.pos,
     Sub: p.sub[0].toUpperCase() + p.sub.slice(1),
     job: c.job,
+    hometown: c.hometown,
     quirk: quirkOf(c).topic,
     memory: c.memories.length ? rng.pick(c.memories) : 'that first day we met',
     ...extra,
@@ -185,8 +187,12 @@ const NPC_RESPONSES = {
   },
   ASK: {
     ok: [
-      { t: 0, s: 'You actually want to know? Okay. Okay okay okay. So—' },
+      { t: 0, s: 'You actually want to know? Okay, so—' },
+      { t: 0, s: 'Ooh, getting personal. I respect it.' },
+      { t: 0, s: 'Nobody usually asks. Here’s the scoop:' },
+      { t: 0, s: 'Since you asked so nicely—' },
       { t: 1, s: 'Nobody ever asks me that. I like that you ask.' },
+      { t: 1, s: 'Careful, keep asking and you’ll actually get to know me.' },
       { t: 2, s: 'Come here, this is a sit-down story.' },
     ],
     fail: [
@@ -224,8 +230,9 @@ const FACT_REVEALS = [
 
 function factCtx(c) {
   const arch = archetypeOf(c);
-  const wants = c.attractedTo.map(g => GENDER_LABELS[g].toLowerCase() + (g === 'enby' ? ' folks' : g === 'man' ? '…men' : '…women')).join(', ')
-    .replace('…men', 'men').replace('…women', 'women');
+  const wants = c.attractedTo
+    .map(g => ({ man: 'men', woman: 'women', enby: 'enby folks' }[g] || g))
+    .join(', ');
   return {
     loves: arch.loves.join(' and '),
     dislikes: arch.dislikes.join(' and '),
@@ -263,7 +270,8 @@ export function playerLineFor(c, player, move, rng) {
 }
 
 // Resolve a chat move → { success, npcText, emotion, dAff, dDes, special }
-export function resolveMove(c, player, move, rng, roleData) {
+// opts: { preferFact, echo, crude, boastful } — used by typed-chat routing.
+export function resolveMove(c, player, move, rng, roleData, opts = {}) {
   const arch = archetypeOf(c);
   const tier = tierFor(c);
   const ctx = ctxFor(c, player, rng, factCtx(c));
@@ -282,7 +290,9 @@ export function resolveMove(c, player, move, rng, roleData) {
       };
     }
     if (unknown.length) {
-      const f = rng.pick(unknown);
+      // a typed question can target a specific fact ("what do you do?")
+      const preferred = opts.preferFact && unknown.find(f => f.key === opts.preferFact);
+      const f = preferred || rng.pick(unknown);
       c.known[f.key] = true;
       return {
         success: true, dAff: 4, dDes: 1, emotion: 'happy', reveal: f.key,
@@ -309,39 +319,76 @@ export function resolveMove(c, player, move, rng, roleData) {
     };
   }
 
+  // ----- boundaries first: some moves are just WRONG right now -----
+  // Spicy talk before they're comfortable reads as creepy, not confident.
+  const spiceGate = (0.35 + 0.65 * (c.patienceForSpice ?? 0.5)) * (tier + (c.desire / 60));
+  if (move === 'SPICY' && spiceGate < 1.0) {
+    c.warnings = (c.warnings ?? 0) + 1;
+    c.mood = Math.max(-2, c.mood - 1);
+    const walk = c.warnings >= 2;
+    return {
+      success: false, rejected: true, walk, dAff: walk ? -8 : -5, dDes: -2, emotion: 'annoyed',
+      npcText: fill(rng.pick(walk ? [
+        'Okay — I’ve been polite, but you keep going there and I’m not interested. I’m gonna go. 🙄',
+        'Yeah, no. Read the room. We’re done here for today.',
+      ] : [
+        'Whoa. WAY too fast, {pet}. You don’t even know my last name.',
+        'Slow. Down. That’s not charming, that’s a lot. Try being a person first.',
+        'Mmm, hard no on that energy right now. Buy me a smoothie before you buy the fantasy.',
+      ]), ctx),
+    };
+  }
+
+  // Turn-offs: the move clashes with something they can't stand.
+  const turnoffHit =
+    (c.turnoffs?.includes('crude') && (opts.crude || move === 'SPICY') && tier < 2) ||
+    (c.turnoffs?.includes('tryhard') && recentSameCount(c, move) >= 2) ||
+    (c.turnoffs?.includes('boastful') && opts.boastful) ||
+    (c.turnoffs?.includes('pushy') && move === 'FLIRT' && c.mood < 0);
+
   // success roll — archetype receptivity × role chemistry × mood × repetition
-  // penalty × player stats × active buffs. Seduction is a build.
+  // penalty × player stats × buffs × THEIR standards. Not a pushover: base is
+  // lower, standards bite, turn-offs and bad timing cost real ground.
   const recentSame = c.lastMoves.filter(m => m === move).length;
   const statDef = STAT_DEFS.find(s => s.moves.includes(move));
   let statLvl = statDef ? (player.stats?.[statDef.id] ?? 0) : 0;
   if (statDef?.id === 'style' && player.buffs?.outfit) statLvl *= 2;
-  let p = 0.62
+  let p = 0.5
     * (arch.receptivity[move] ?? 1)
     * roleChemistry(c, player)
     * (roleData?.moveBonus?.[move] ?? 1)
-    * (1 + c.mood * 0.08)
-    * (1 + statLvl * 0.03)
+    * (1 + c.mood * 0.1)
+    * (1 + statLvl * 0.035)
+    * (1.25 - 0.5 * (c.standards ?? 0.7))   // picky people are harder, full stop
     * (player.buffs?.courage > 0 ? 1.2 : 1)
-    * Math.max(0.35, 1 - recentSame * 0.22);
-  if (move === 'SPICY') p *= Math.min(1, c.desire / 55);
-  p = Math.max(0.08, Math.min(0.95, p));
+    * (turnoffHit ? 0.45 : 1)
+    * Math.max(0.3, 1 - recentSame * 0.26);  // repeating yourself gets old fast
+  if (move === 'SPICY') p *= Math.min(1, (c.desire / 55) * (0.6 + c.libido));
+  if (move === 'FLIRT' && tier === 0) p *= 0.8;  // strangers aren't easy
+  p = Math.max(0.05, Math.min(0.94, p));
   const success = rng.chance(p);
 
   c.lastMoves.push(move);
   if (c.lastMoves.length > 4) c.lastMoves.shift();
 
   const bank = NPC_RESPONSES[move][success ? 'ok' : 'fail'];
-  const npcText = garnish(c, fill(pickTiered(bank, tier, rng), ctx), rng);
+  let npcText = garnish(c, fill(pickTiered(bank, tier, rng), ctx), rng);
+  if (!success && turnoffHit) {
+    npcText = fill(rng.pick([
+      'Ehh. That’s kind of a {turnoff} move, and {turnoff} isn’t my thing.',
+      'Not gonna lie, that landed a little {turnoff}. Not my favorite.',
+    ]), { ...ctx, turnoff: c.turnoffs.find(Boolean) });
+  }
 
   const heatMul = 1 + tier * 0.25;
   const mojoMul = (move === 'FLIRT' || move === 'SPICY') ? 1 + (player.mojo ?? 0) * 0.02 : 1;
   let dAff = 0, dDes = 0, emotion;
   if (success) {
-    const base = { COMPLIMENT: [3, 2], FLIRT: [3, 4], TEASE: [3, 3], JOKE: [4, 1], SPICY: [2, 8], SERENADE: [5, 4] }[move];
+    const base = { COMPLIMENT: [3, 2], FLIRT: [3, 4], TEASE: [3, 3], JOKE: [4, 1], SPICY: [2, 8], SERENADE: [5, 4], SMALLTALK: [2, 1], GREETING: [1, 0], AGREE: [1, 1] }[move] || [2, 1];
     dAff = Math.round(base[0] * heatMul);
-    dDes = Math.round(base[1] * arch.desireGain * heatMul * mojoMul);
+    dDes = Math.round(base[1] * arch.desireGain * heatMul * mojoMul * (0.7 + (c.libido ?? 0.6)));
+    c.warnings = 0; // a good beat resets their patience
     if (c.mood < 2 && rng.chance(0.4)) c.mood += 1;
-    // fulfilled an 'attention' desire?
     const want = currentDesireOf(c);
     if (want?.type === 'attention') {
       const match = (want.id === 'want_words' && (move === 'COMPLIMENT' || move === 'FLIRT'))
@@ -350,12 +397,20 @@ export function resolveMove(c, player, move, rng, roleData) {
     }
     emotion = move === 'SPICY' ? 'sultry' : move === 'JOKE' ? 'laugh' : tier >= 2 ? 'love' : 'happy';
   } else {
-    dAff = move === 'SPICY' ? -3 : -1;
+    dAff = move === 'SPICY' ? -3 : turnoffHit ? -3 : -1;
     dDes = move === 'SPICY' ? -2 : 0;
-    if (rng.chance(0.35)) c.mood = Math.max(-2, c.mood - 1);
-    emotion = move === 'SPICY' ? 'annoyed' : 'smirk';
+    if (rng.chance(0.4)) c.mood = Math.max(-2, c.mood - 1);
+    // persistent failure wears them out and can end the conversation
+    if (turnoffHit || move === 'SPICY') c.warnings = (c.warnings ?? 0) + 1;
+    emotion = move === 'SPICY' || turnoffHit ? 'annoyed' : 'smirk';
   }
-  return { success, npcText, emotion, dAff, dDes };
+  const walk = (c.warnings ?? 0) >= 3;
+  if (walk) npcText += ' ' + rng.pick(['...Okay, I’m gonna mingle. See you around.', 'Anyway. I need some air. Later, {pet}.'.replace('{pet}', ctx.pet)]);
+  return { success, npcText, emotion, dAff, dDes, walk };
+}
+
+function recentSameCount(c, move) {
+  return (c.lastMoves || []).filter(m => m === move).length;
 }
 
 // ---------- gifts ----------
@@ -891,4 +946,178 @@ export function groupAfterline(c, other, player, rng) {
     'Between us? I get why you like {other}. Between us also? I like how you look when we’re all laughing. Do this again soon.',
     'Group consensus reached while you bought the drinks: you’re stuck with us both now. Motion passed unanimously.',
   ]), ctx), rng);
+}
+
+// ================= typed free-text chat =================
+// The player types a message; we understand it and compose a reply that
+// mirrors what they said, driven by the same seduction math (so wrong/creepy
+// messages still cost). If window.BCB_CHAT_PROVIDER is set, game.js uses that
+// instead for truly generative replies — this is the offline path.
+
+const INTENT_TO_MOVE = {
+  COMPLIMENT: 'COMPLIMENT', FLIRT: 'FLIRT', TEASE: 'TEASE', JOKE: 'JOKE',
+  ASK: 'ASK', SPICY: 'SPICY', SERENADE: 'SERENADE',
+  GREETING: 'GREETING', AGREE: 'AGREE', SMALLTALK: 'SMALLTALK',
+};
+
+// A short lead-in that reflects what they actually said, so replies feel heard.
+function reflect(nlu, c, player, rng) {
+  if (rng.chance(0.4)) return ''; // not every line — avoid a formula
+  const ctx = ctxFor(c, player, rng);
+  const echo = nlu.echo;
+  if (nlu.intent === 'COMPLIMENT' && echo) {
+    return fill(rng.pick([`My ${echo}? `, `“${cap(echo)},” huh. `, `You noticed my ${echo}. `]), ctx);
+  }
+  if (nlu.intent === 'FLIRT' && echo) return rng.pick([`Smooth. `, `Oh, we’re doing this? `, `Bold opener. `]);
+  if (nlu.intent === 'SPICY') return rng.pick([`Well. `, `*raises an eyebrow* `, `Someone’s feeling brave. `]);
+  if (nlu.intent === 'TEASE') return rng.pick([`Oh it’s ON. `, `Big talk. `, `You’re asking for it. `]);
+  if (nlu.topic && rng.chance(0.6)) return fill(rng.pick([`${cap(topicLabel(nlu.topic, c))}? `, `Talking about ${topicLabel(nlu.topic, c)}, nice. `]), ctx);
+  return '';
+}
+
+// Sometimes bounce a question back so the conversation actually flows.
+function followUp(nlu, c, player, rng) {
+  const tier = tierFor(c);
+  if (rng.chance(0.6)) return '';
+  const ctx = ctxFor(c, player, rng);
+  return ' ' + fill(pickTiered([
+    { t: 0, s: rng.pick(['What about you?', 'So what’s your deal, {player}?', 'Your turn — tell me something.']) },
+    { t: 1, s: rng.pick(['Come here often, or am I just lucky today?', 'Okay, your turn to impress me.']) },
+    { t: 2, s: rng.pick(['What are you doing later, {pet}?', 'You gonna keep looking at me like that?']) },
+    { t: 3, s: rng.pick(['How much longer are we pretending we’re just talking?', 'Say the word, {pet}.']) },
+  ], tier, rng), ctx);
+}
+
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+
+const SMALLTALK_BANK = [
+  { t: 0, s: 'Ha, okay. I like where your head’s at. Keep talking.' },
+  { t: 0, s: 'Mm-hm. You’re easy to talk to, I’ll give you that.' },
+  { t: 1, s: 'You know, most people bore me by now. You don’t. Suspicious.' },
+  { t: 2, s: 'I could do this all day, {pet}. Just talk. And... other things.' },
+];
+const GREETING_BANK = [
+  { t: 0, s: 'Hey yourself. To what do I owe the pleasure?' },
+  { t: 0, s: 'Well hi. You’ve got my attention — briefly. Use it well.' },
+  { t: 1, s: 'There you are. I was starting to think you forgot about me, {pet}.' },
+  { t: 2, s: 'Hey you. Get over here, I don’t bite. Much.' },
+];
+const CONFUSED_BANK = [
+  '...I have absolutely no idea what you mean, but okay.',
+  'That’s a sentence. Words were involved. I respect the effort.',
+  'Huh? You’re gonna have to run that by me again, {pet}.',
+];
+
+// Map a topic to which profile fact a question is really asking about.
+function factForTopic(topic) {
+  return { work: 'job', home: 'hometown', likes: 'loves', dislikes: 'dislikes',
+    quirk: 'quirk', type: 'type', rel: 'rel' }[topic] || null;
+}
+
+// Resolve typed text → same shape as resolveMove, plus .nlu and .walk.
+export function resolveTyped(c, player, text, rng, roleData) {
+  const nlu = classify(text, c, player);
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng);
+
+  // Being mean has consequences — they are not here for it.
+  if (nlu.intent === 'INSULT') {
+    c.warnings = (c.warnings ?? 0) + 1;
+    c.mood = Math.max(-2, c.mood - 1);
+    const walk = c.warnings >= 2;
+    return {
+      nlu, success: false, dAff: walk ? -10 : -6, dDes: -2, emotion: 'annoyed', walk,
+      npcText: fill(rng.pick(walk ? [
+        'Wow. Yeah, I’m done. Find someone else to be a jerk to. 🚶',
+        'Nope. Not spending my summer on that. Bye, {player}.',
+      ] : [
+        'Excuse me? That was uncalled for.',
+        'Okay, rude. Try that again and I’m walking.',
+        '*narrows eyes* Bold of you to think that works on me.',
+      ]), ctx),
+    };
+  }
+
+  // Greetings and idle small talk: light, warm-ish, low stakes.
+  if (nlu.intent === 'GREETING' || nlu.intent === 'AGREE') {
+    const bank = nlu.intent === 'GREETING' ? GREETING_BANK : SMALLTALK_BANK;
+    const dAff = nlu.intent === 'GREETING' ? 1 : 1;
+    return { nlu, success: true, dAff, dDes: 0, emotion: 'happy',
+      npcText: garnish(c, reflect(nlu, c, player, rng) + fill(pickTiered(bank, tier, rng), ctx), rng) };
+  }
+  if (nlu.intent === 'SMALLTALK') {
+    // very short / unparseable → confused; otherwise friendly small talk
+    if (text.trim().length < 3 || !nlu.echo) {
+      return { nlu, success: true, dAff: 0, dDes: 0, emotion: 'smirk',
+        npcText: garnish(c, fill(rng.pick(CONFUSED_BANK), ctx), rng) };
+    }
+    return { nlu, success: true, dAff: 1, dDes: 0, emotion: 'happy',
+      npcText: garnish(c, reflect(nlu, c, player, rng) + fill(pickTiered(SMALLTALK_BANK, tier, rng), ctx)
+        + followUp(nlu, c, player, rng), rng) };
+  }
+
+  // Everything else routes through the move engine (keeps stat math, gossip,
+  // boundaries, turn-offs). Typed questions target the fact they asked about.
+  const move = INTENT_TO_MOVE[nlu.intent] || 'SMALLTALK';
+  const opts = {
+    preferFact: nlu.intent === 'ASK' ? factForTopic(nlu.topic) : null,
+    echo: nlu.echo,
+    crude: nlu.intent === 'SPICY',
+  };
+  const r = resolveMove(c, player, move, rng, roleData, opts);
+  // decorate with a reflection + occasional follow-up so it reads as a reply
+  if (!r.special && !r.rejected && !r.deflected) {
+    const lead = reflect(nlu, c, player, rng);
+    const tail = r.success ? followUp(nlu, c, player, rng) : '';
+    r.npcText = (lead + r.npcText + tail).trim();
+  }
+  r.nlu = nlu;
+  return r;
+}
+
+// Detect typed intent for the pivotal relationship scenes so the player can
+// answer them by typing instead of only tapping. Returns a choice id or null.
+export function classifyChoice(text, choices) {
+  const t = text.toLowerCase();
+  const has = (...ws) => ws.some(w => t.includes(w));
+  const ids = choices.map(c => c.id);
+  const pick = id => ids.includes(id) ? id : null;
+  // DTR
+  if (ids.includes('exclusive') && has('exclusive', 'only you', 'just you', 'just us', 'nobody else', 'be together', 'official', 'girlfriend', 'boyfriend', 'partner')) return 'exclusive';
+  if (ids.includes('open') && has('open', 'see other', 'polyam', 'poly', 'not exclusive', 'honest', 'other people')) return 'open';
+  if (ids.includes('nolabel') && has('no label', 'not sure', 'slow', 'casual', 'don’t know', "don't know", 'no rush', 'keep it')) return 'nolabel';
+  // confrontation
+  if (ids.includes('apologize') && has('sorry', 'apolog', 'my fault', 'forgive', 'messed up')) return 'apologize';
+  if (ids.includes('confess') && has('truth', 'honest', 'confess', 'came clean', 'come clean', 'tell you everything', 'yes i')) return 'confess';
+  if (ids.includes('deny') && has('wasn’t me', "wasn't me", 'not true', 'lie', 'didn’t', "didn't", 'never happened', 'rumor')) return 'deny';
+  // stray
+  if (ids.includes('forgive') && has('forgive', 'thank you', 'come here', 'okay', 'it’s okay', "it's okay", 'stay', 'work through')) return 'forgive';
+  if (ids.includes('leave') && has('over', 'done', 'leave', 'can’t', "can't", 'goodbye', 'we’re through', 'break up')) return 'leave';
+  // ultimatum
+  if (ids.includes('them') && has('you', 'only you', 'choose you', 'pick you', 'want you')) return 'them';
+  if (ids.includes('free') && has('can’t promise', "can't promise", 'freedom', 'free', 'no', 'both')) return 'free';
+  return null;
+}
+
+// Persona/context bundle handed to an LLM provider so it stays in character.
+export function chatPersona(c, player, recentLog) {
+  const arch = archetypeOf(c);
+  const p = pronounsOf(c);
+  return {
+    name: c.name, age: c.age, pronouns: p.label,
+    personality: `${arch.label}: ${arch.desc}`,
+    job: c.known.job ? c.job : 'undisclosed',
+    relationship: tierLabelSafe(c),
+    agreement: c.agreement,
+    mood: ['hostile', 'annoyed', 'neutral', 'warm', 'smitten'][c.mood + 2],
+    interested: isInterested(c, player),
+    likes: c.known.loves ? arch.loves : undefined,
+    turnoffs: c.turnoffs,
+    boldness: c.boldness, libido: c.libido,
+    recent: recentLog,
+    style: 'Reply in first person as this character. Flirty, witty, with real boundaries — you are NOT a pushover and reject moves that are creepy, boring, or too fast. Keep it suggestive, never sexually explicit. 1-3 sentences.',
+  };
+}
+function tierLabelSafe(c) {
+  try { return ['strangers', 'flirting', 'dating', 'lovers'][tierFor(c)]; } catch { return 'strangers'; }
 }

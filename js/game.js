@@ -16,7 +16,7 @@ import {
   finaleSVG, spawnFireworks, describeCharacter, shade,
 } from './art.js';
 import {
-  availableMoves, playerLineFor, resolveMove, giftReaction,
+  resolveTyped, classifyChoice, chatPersona, giftReaction,
   dateNarration, dateReaction, proactiveText, greeting, meetLine,
   textExchange, fill,
   dtrOpen, DTR_CHOICES, resolveDTR,
@@ -87,6 +87,14 @@ function migrate(data) {
     c.spark ??= 0;
     c.measurements ??= null;
     c.look.accent ??= c.id.charCodeAt(0) % ACCENTS.length;
+    // sexual-personality fields for pre-typed-chat saves
+    c.libido ??= 0.3 + (c.id.charCodeAt(1) % 7) / 10;
+    c.boldness ??= 0.3 + (c.id.charCodeAt(2) % 7) / 10;
+    c.standards ??= 0.5 + (c.id.charCodeAt(3) % 5) / 10;
+    c.patienceForSpice ??= 0.3 + (c.id.charCodeAt(1) % 6) / 10;
+    c.turnoffs ??= ['crude', 'pushy'];
+    c.warnings ??= 0;
+    c.walkedToday ??= false;
   }
   return data;
 }
@@ -203,11 +211,13 @@ function finishCreator() {
 function startGame() {
   show('#game-screen');
   lastHeat = -1;
+  activeScene = null; awaitingReply = false;
   renderAll();
   const c = active();
   if (!(S.logs[c.id]?.length)) npcSay(greeting(c, playerForDialogue(), rng));
   else renderLog();
   maybeScene(c);
+  refreshChatBar();
   flushTextsBadge();
 }
 
@@ -415,13 +425,15 @@ function maybeScene(c) {
   return false;
 }
 
+// Show scene choices as buttons AND register them so the player can type an
+// answer instead of tapping. Cleared once a choice is made.
 function presentChoices(choices, handler) {
+  activeScene = { choices, handler };
+  const done = id => { activeScene = null; $('#choices').innerHTML = ''; handler(id); if (typeof refreshChatBar === 'function') refreshChatBar(); };
   $('#choices').innerHTML = choices.map(ch =>
     `<button class="btn choice warm" data-scene="${ch.id}">${ch.label}</button>`).join('');
-  $('#choices').querySelectorAll('[data-scene]').forEach(b => b.onclick = () => {
-    $('#choices').innerHTML = '';
-    handler(b.dataset.scene);
-  });
+  $('#choices').querySelectorAll('[data-scene]').forEach(b => b.onclick = () => done(b.dataset.scene));
+  if (typeof refreshChatBar === 'function') refreshChatBar();
 }
 
 function sceneConfront(c, preemptive = false) {
@@ -521,63 +533,121 @@ function goGroupDate(c, m) {
   }, 600);
 }
 
-function doTalk() {
+// ---------------- typed chat ----------------
+let activeScene = null; // { choices, handler } while a pivotal scene is open
+let awaitingReply = false;
+
+// Contextual quick-chips above the input (Heart-to-heart / Come clean), plus
+// a note when the NPC has walked off.
+function refreshChatBar() {
   const c = active();
-  if (maybeScene(c)) return; // pending drama outranks small talk
-  const moves = availableMoves(c, playerForDialogue(), rng);
+  const input = $('#chat-input');
+  const gone = c.walkedToday && !c.partner;
+  // input stays usable during scenes so answers can be typed; only truly
+  // blocked while a reply is in flight or the NPC has left
+  input.disabled = awaitingReply || gone;
+  input.placeholder = gone ? `${c.name} walked off — find them elsewhere later.`
+    : activeScene ? 'Type your answer, or tap a choice above…'
+    : awaitingReply ? '…' : `Say something to ${c.name}…`;
+  if (activeScene) { $('#chat-chips').innerHTML = ''; return; }
   const tier = tierFor(c);
-  let html = moves.map(m =>
-    `<button class="btn choice" data-move="${m.type}">${m.label}</button>`).join('');
-  if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none') {
-    html += `<button class="btn choice warm" data-special="dtr">💕 Heart-to-heart</button>`;
-  }
-  if ((c.guilt ?? 0) > 0 && (c.agreement === 'exclusive' || tier >= 2)) {
-    html += `<button class="btn choice warm" data-special="confess">😳 Come clean</button>`;
-  }
-  $('#choices').innerHTML = html;
-  $('#choices').querySelectorAll('[data-move]').forEach(b => b.onclick = () => doMove(b.dataset.move));
-  $('#choices').querySelectorAll('[data-special]').forEach(b => b.onclick = () => {
-    $('#choices').innerHTML = '';
-    if (b.dataset.special === 'dtr') {
-      playerSay('Hey... can we talk? About us, I mean.');
-      setTimeout(() => sceneDTR(c, false), 420);
-    } else {
-      playerSay('There’s something I need to tell you, and you deserve to hear it from me.');
-      setTimeout(() => sceneConfront(c, true), 420);
-    }
+  const chips = [];
+  if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none')
+    chips.push('<button class="chip mini action" data-chip="dtr">💕 Define the relationship</button>');
+  if ((c.guilt ?? 0) > 0 && (c.agreement === 'exclusive' || tier >= 2))
+    chips.push('<button class="chip mini action" data-chip="confess">😳 Come clean</button>');
+  $('#chat-chips').innerHTML = chips.join('');
+  $('#chat-chips').querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
+    if (b.dataset.chip === 'dtr') { playerSay('Hey… can we talk about us?'); setTimeout(() => sceneDTR(c, false), 420); }
+    else { playerSay('There’s something I need to tell you.'); setTimeout(() => sceneConfront(c, true), 420); }
   });
 }
 
-function doMove(move) {
+function sendTyped() {
+  const input = $('#chat-input');
+  const text = input.value.trim();
+  if (!text || awaitingReply) return;
   const c = active();
-  $('#choices').innerHTML = '';
-  playerSay(playerLineFor(c, playerForDialogue(), move, rng));
-  const r = resolveMove(c, playerForDialogue(), move, rng, roleData());
-  applyDelta(c, r.dAff, r.dDes);
-  // buffs & mojo bookkeeping
-  if (S.player.buffs.courage > 0) S.player.buffs.courage -= 1;
-  if (r.success && (move === 'SPICY' || (move === 'FLIRT' && tierFor(c) >= 2))) {
-    S.player.mojo = Math.min(20, S.player.mojo + 1);
+  input.value = '';
+
+  // Pivotal scene open → the typed line answers it.
+  if (activeScene) {
+    const id = classifyChoice(text, activeScene.choices);
+    playerSay(text);
+    if (id) { const h = activeScene.handler; activeScene = null; h(id); }
+    else setTimeout(() => { npcSay(rng.pick(['That’s not really an answer, {n}. Which is it?'.replace('{n}', S.player.name), 'I need a straight answer here.'])); refreshChatBar(); }, 350);
+    return;
   }
-  // open flirting feeds the gossip mill for anyone you've made promises to
-  if (r.success && ['FLIRT', 'SPICY', 'SERENADE'].includes(move)) registerRomance(c, 0.15);
+
+  playerSay(text);
+
+  // Typed phrases can open the relationship scenes directly.
+  const low = text.toLowerCase();
+  const tier = tierFor(c);
+  if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none'
+      && /(what are we|define|are we exclusive|be exclusive|official|together|boyfriend|girlfriend|dating\??$)/.test(low)) {
+    setTimeout(() => sceneDTR(c, false), 400); return;
+  }
+  if ((c.guilt ?? 0) > 0 && /(i have to be honest|come clean|confess|cheat|i kissed|i went out with|tell you something)/.test(low)) {
+    setTimeout(() => sceneConfront(c, true), 400); return;
+  }
+
+  npcReply(c, text);
+}
+
+// Compose the NPC's reply: LLM provider if wired, else offline procedural.
+async function npcReply(c, text) {
+  awaitingReply = true;
+  refreshChatBar();
+  const pl = playerForDialogue();
+  const prov = window.BCB_CHAT_PROVIDER;
+  let r;
+  if (typeof prov === 'function') {
+    // provider generates the words; NLU on the player's text drives the stats
+    r = resolveTyped(c, pl, text, rng, roleData());
+    try {
+      const recent = (S.logs[c.id] || []).slice(-6).map(e => `${e.who === 'me' ? S.player.name : c.name}: ${e.text}`);
+      const out = await prov(text, chatPersona(c, pl, recent), { tier: tierFor(c) });
+      if (out && typeof out === 'string') r.npcText = out.trim();
+    } catch { /* fall back to procedural r.npcText */ }
+  } else {
+    r = resolveTyped(c, pl, text, rng, roleData());
+  }
+
+  applyDelta(c, r.dAff, r.dDes);
+  if (S.player.buffs.courage > 0) S.player.buffs.courage -= 1;
+  const intent = r.nlu?.intent;
+  if (r.success && (intent === 'SPICY' || (intent === 'FLIRT' && tierFor(c) >= 2)))
+    S.player.mojo = Math.min(20, S.player.mojo + 1);
+  if (r.success && ['FLIRT', 'SPICY', 'SERENADE'].includes(intent)) registerRomance(c, 0.15);
+  if (r.walk) c.walkedToday = true;
+
   setTimeout(() => {
     npcSay(r.npcText);
     if (r.special === 'transShare') {
-      $('#choices').innerHTML = r.replyChoices.map((t, i) =>
-        `<button class="btn choice warm" data-reply="${i}">${t}</button>`).join('');
-      $('#choices').querySelectorAll('[data-reply]').forEach(b => b.onclick = () => {
-        $('#choices').innerHTML = '';
-        playerSay(r.replyChoices[+b.dataset.reply]);
-        applyDelta(c, 6, 2);
-        setTimeout(() => {
-          npcSay('...Yeah. You’re a keeper. Come here. 🫶');
-          afterAction('love', true);
-        }, 450);
-      });
+      openReplyScene(r.replyChoices, c);
     }
+    awaitingReply = false;
     afterAction(r.emotion, r.success);
+    refreshChatBar();
   }, 420);
+}
+
+function openReplyScene(replies, c) {
+  activeScene = {
+    choices: replies.map((t, i) => ({ id: String(i), label: t })),
+    handler: id => {
+      playerSay(replies[+id]);
+      applyDelta(c, 6, 2);
+      setTimeout(() => { npcSay('...Yeah. You’re a keeper. Come here. 🫶'); afterAction('love', true); refreshChatBar(); }, 450);
+    },
+  };
+  $('#choices').innerHTML = replies.map((t, i) => `<button class="btn choice warm" data-scene="${i}">${t}</button>`).join('');
+  $('#choices').querySelectorAll('[data-scene]').forEach(b => b.onclick = () => {
+    $('#choices').innerHTML = '';
+    const h = activeScene.handler; activeScene = null; h(b.dataset.scene);
+  });
+  refreshChatBar();
 }
 
 function openShop() {
@@ -830,6 +900,7 @@ function doSleep() {
   for (const c of S.npcs) {
     const neglected = dailyTick(c, S.player.day, rng, pl);
     delete c._datedToday;
+    c.walkedToday = false; c.warnings = 0; // patience resets with the sunrise
     const tier = tierFor(c);
     // relationship pressure: mono hearts at Dating tier want the Talk
     if (c.relStyle === 'mono' && tier >= 2 && c.agreement === 'none'
@@ -940,6 +1011,7 @@ function switchTo(id) {
   const prev = active();
   if (prev && prev.id !== id) prev.spark = 0; // walking away breaks the spark
   S.activeId = id;
+  activeScene = null; awaitingReply = false;
   lastHeat = -1;
   renderAll();
   const c = active();
@@ -951,6 +1023,7 @@ function switchTo(id) {
     npcSay(greeting(c, playerForDialogue(), rng));
   }
   maybeScene(c); // pending drama meets you at the door
+  refreshChatBar();
   flushTextsBadge();
   save();
 }
@@ -1094,10 +1167,10 @@ function bindUI() {
   };
   $('#btn-texts').onclick = openPhone;
   $('#btn-finale').onclick = startFinale;
+  $('#chat-bar').addEventListener('submit', e => { e.preventDefault(); sendTyped(); });
   document.querySelectorAll('#actions [data-action]').forEach(b => {
     b.onclick = () => {
       const a = b.dataset.action;
-      if (a === 'talk') doTalk();
       if (a === 'gift') openShop();
       if (a === 'date') openDates();
       if (a === 'hustle') openHustle();

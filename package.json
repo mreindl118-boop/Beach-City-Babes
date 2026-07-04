@@ -2,6 +2,7 @@
   "name": "beach-city-babes",
   "version": "0.2.0-alpha",
   "private": true,
+  "type": "module",
   "description": "A procedural summer of flirting dangerously. 18+ text dating sim, PWA + Android.",
   "scripts": {
     "serve": "python3 -m http.server 8080"

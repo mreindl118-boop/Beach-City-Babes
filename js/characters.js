@@ -72,6 +72,15 @@ export function generateCharacter(rng, usedNames = new Set()) {
     hometown: rng.pick(HOMETOWNS),
     archetype: arch.id,
     quirk: quirk.id,
+    // sexual personality — these make each person want different things and
+    // refuse others. Nobody is a pushover; the wrong move actively costs you.
+    libido: rng.float(0.35, 1),      // how much they run on desire vs. slow romance
+    boldness: rng.float(0.2, 1),     // how forward THEY get, and how soon
+    standards: rng.float(0.4, 1),    // pickiness: high = success is harder, gifts matter less
+    patienceForSpice: rng.float(0.2, 0.9), // how early spicy talk is welcome vs. creepy
+    turnoffs: rng.shuffle(['clingy', 'crude', 'boastful', 'pushy', 'boring', 'tryhard']).slice(0, 2),
+    warnings: 0,                     // strikes this conversation before they walk
+    walkedToday: false,
     body: rng.pick(presentation === 'fem'
       ? ['slim', 'curvy', 'athletic', 'soft', 'muscular']
       : ['slim', 'athletic', 'soft', 'muscular', 'curvy']),

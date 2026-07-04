@@ -84,8 +84,12 @@
       <div id="chat-panel">
         <div id="chat-log"></div>
         <div id="choices"></div>
+        <div id="chat-chips"></div>
+        <form id="chat-bar" autocomplete="off">
+          <input id="chat-input" type="text" maxlength="240" placeholder="Say something to them…" aria-label="Type a message">
+          <button id="chat-send" type="submit" class="btn primary">Send</button>
+        </form>
         <nav id="actions">
-          <button class="btn act" data-action="talk">💬 Talk</button>
           <button class="btn act" data-action="gift">🎁 Gift</button>
           <button class="btn act" data-action="date">🌴 Date</button>
           <button class="btn act" data-action="phone">📱 Phone</button>
