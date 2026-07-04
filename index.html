@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ff5d8f">
+  <title>Beach City Babes 🍑</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ============ TITLE ============ -->
+  <section id="title-screen" class="screen">
+    <div class="title-inner">
+      <div class="logo">🍑</div>
+      <h1>Beach City <span>Babes</span></h1>
+      <p class="tagline">a procedural summer of flirting dangerously</p>
+
+      <div id="age-gate" class="panel">
+        <p>This game contains flirting, innuendo, and scandalous swimwear.<br><b>Are you 18 or older?</b></p>
+        <button class="btn primary" id="age-yes">I’m 18+ — let me in 😎</button>
+      </div>
+
+      <div id="title-main" class="hidden">
+        <div id="slot-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CHARACTER CREATOR ============ -->
+  <section id="creator-screen" class="screen hidden">
+    <div class="creator-inner">
+      <h2>Who arrives in Beach City?</h2>
+
+      <label class="cc-label">Name</label>
+      <input id="cc-name" maxlength="16" placeholder="Alex" autocomplete="off">
+
+      <label class="cc-label">Gender</label>
+      <div id="cc-genders" class="chip-row"></div>
+      <div id="cc-trans" class="chip-row"></div>
+
+      <label class="cc-label">Pronouns</label>
+      <div id="cc-pronouns" class="chip-row"></div>
+
+      <label class="cc-label">Your role this summer <span class="cc-hint">— some babes will love it, some won’t</span></label>
+      <div id="cc-roles"></div>
+
+      <div class="creator-btns">
+        <button class="btn" id="cc-back">← Back</button>
+        <button class="btn primary" id="cc-go">🌅 Start the summer</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GAME ============ -->
+  <section id="game-screen" class="screen hidden">
+    <header id="topbar">
+      <span id="coins">🪙 0</span>
+      <span id="daytime">☀️ Day 1 · 9:00</span>
+      <span id="hearts-won">💛 0</span>
+      <span id="stats-strip" class="stats-strip"></span>
+      <span class="grow"></span>
+      <button class="iconbtn" id="btn-texts">📱<span id="texts-badge" class="badge hidden">0</span></button>
+      <button class="iconbtn" id="btn-menu">☰</button>
+    </header>
+
+    <main id="main">
+      <div id="char-panel">
+        <div id="portrait-box"></div>
+        <div id="char-name" class="char-name"></div>
+        <div id="char-chips" class="chips"></div>
+        <div class="meters">
+          <div class="meter" id="meter-aff"><span class="ico">♥</span><div class="bar"><div class="fill aff"></div></div><span class="val">0</span></div>
+          <div class="meter" id="meter-des"><span class="ico">🔥</span><div class="bar"><div class="fill des"></div></div><span class="val">0</span></div>
+          <div class="mood">mood <span id="mood-emoji">😐</span> <span id="spark" class="spark"></span></div>
+        </div>
+        <div id="profile"></div>
+        <button class="btn finale hidden" id="btn-finale">🔥💘 Invite to the Bonfire 💘🔥</button>
+      </div>
+
+      <div id="chat-panel">
+        <div id="chat-log"></div>
+        <div id="choices"></div>
+        <nav id="actions">
+          <button class="btn act" data-action="talk">💬 Talk</button>
+          <button class="btn act" data-action="gift">🎁 Gift</button>
+          <button class="btn act" data-action="date">🌴 Date</button>
+          <button class="btn act" data-action="phone">📱 Phone</button>
+          <button class="btn act" data-action="hustle">💼 Hustle</button>
+          <button class="btn act" data-action="items">🎒 Items</button>
+          <button class="btn act" data-action="sleep">😴 Sleep</button>
+          <button class="btn act" data-action="boardwalk">🎡 Boardwalk</button>
+          <button class="btn act" data-action="roster">💞 People</button>
+        </nav>
+      </div>
+    </main>
+  </section>
+
+  <!-- overlays -->
+  <div id="modal" class="hidden"><div id="modal-body" class="panel"></div></div>
+  <div id="finale-overlay" class="hidden"></div>
+  <div id="toast" class="hidden"></div>
+
+  <script type="module" src="js/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Beach City Babes: the cute butt peach 🍑 -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffd166"/>
+      <stop offset="60%" stop-color="#ff9e6d"/>
+      <stop offset="100%" stop-color="#ff6a88"/>
+    </linearGradient>
+    <radialGradient id="peachL" cx="38%" cy="35%" r="80%">
+      <stop offset="0%" stop-color="#ffc4a3"/>
+      <stop offset="55%" stop-color="#ff9e7d"/>
+      <stop offset="100%" stop-color="#f4715f"/>
+    </radialGradient>
+    <radialGradient id="peachR" cx="62%" cy="35%" r="80%">
+      <stop offset="0%" stop-color="#ffc9ab"/>
+      <stop offset="55%" stop-color="#ffa285"/>
+      <stop offset="100%" stop-color="#f47a66"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#sky)"/>
+  <!-- sun -->
+  <circle cx="256" cy="118" r="46" fill="#fff3c4" opacity="0.9"/>
+  <!-- leaf + stem -->
+  <path d="M256 152 C250 128 262 108 284 100 C284 124 274 144 256 152 Z" fill="#57b56b"/>
+  <path d="M236 116 C244 132 252 144 256 156 L246 158 C240 144 236 130 236 116 Z" fill="#7a5230"/>
+  <!-- the peach cheeks -->
+  <ellipse cx="182" cy="290" rx="118" ry="128" fill="url(#peachL)"/>
+  <ellipse cx="330" cy="290" rx="118" ry="128" fill="url(#peachR)"/>
+  <!-- cleft -->
+  <path d="M256 168 C238 230 238 330 256 404 C274 330 274 230 256 168 Z" fill="#e05a4e" opacity="0.55"/>
+  <path d="M256 172 C242 232 242 328 256 398" stroke="#c94a44" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <!-- blush -->
+  <ellipse cx="130" cy="300" rx="30" ry="18" fill="#ff5d8f" opacity="0.5"/>
+  <ellipse cx="382" cy="300" rx="30" ry="18" fill="#ff5d8f" opacity="0.5"/>
+  <!-- shine -->
+  <ellipse cx="150" cy="230" rx="34" ry="20" fill="#fff" opacity="0.55" transform="rotate(-24 150 230)"/>
+  <!-- wink + smile: it's a cheeky peach -->
+  <path d="M196 342 Q256 380 316 342" stroke="#a63d38" stroke-width="12" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <!-- sparkles -->
+  <path d="M96 150 l7 16 16 7 -16 7 -7 16 -7 -16 -16 -7 16 -7 Z" fill="#fff" opacity="0.95"/>
+  <path d="M416 168 l5 12 12 5 -12 5 -5 12 -5 -12 -12 -5 12 -5 Z" fill="#fff" opacity="0.9"/>
+  <path d="M420 400 l6 14 14 6 -14 6 -6 14 -6 -14 -14 -6 14 -6 Z" fill="#ffe9a8" opacity="0.95"/>
+</svg>

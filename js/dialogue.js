@@ -1,0 +1,638 @@
+// Procedural dialogue engine.
+// Every line is grammar-template text filled with character context, filtered
+// by relationship tier (heat), flavored by archetype voice, and pronoun-aware.
+import {
+  PET_NAMES, GIFTS, ACTIVITIES, GENDER_LABELS, tierFor,
+  TRANS_SHARE_LINES, TRANS_SHARE_REPLIES, STAT_DEFS,
+} from './data.js';
+import {
+  archetypeOf, quirkOf, pronounsOf, isInterested, roleChemistry,
+  currentDesireOf, addMemory, clampStats,
+} from './characters.js';
+
+// ---------- template filling ----------
+export function fill(tpl, ctx) {
+  return tpl.replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null ? ctx[k] : `{${k}}`));
+}
+
+export function ctxFor(c, player, rng, extra = {}) {
+  const p = pronounsOf(c);
+  return {
+    name: c.name,
+    player: player.name,
+    pet: rng.pick(PET_NAMES),
+    sub: p.sub, obj: p.obj, pos: p.pos,
+    Sub: p.sub[0].toUpperCase() + p.sub.slice(1),
+    job: c.job,
+    quirk: quirkOf(c).topic,
+    memory: c.memories.length ? rng.pick(c.memories) : 'that first day we met',
+    ...extra,
+  };
+}
+
+// Archetype voice: emoji/interjection garnish appended to some lines.
+const VOICE = {
+  sunny:    { tag: ['😄', '☀️', 'hehe', '💛'], style: 'bubbly' },
+  shy:      { tag: ['...', '😳', '//blushes//', '🫣'], style: 'soft' },
+  sporty:   { tag: ['😤', 'ha!', '🔥', 'bet.'], style: 'punchy' },
+  artsy:    { tag: ['✨', '🌙', 'mm.', '🎨'], style: 'dreamy' },
+  glam:     { tag: ['💅', 'obviously.', '😌', '👑'], style: 'polished' },
+  mystic:   { tag: ['🔮', '🌊', 'the cards knew.', '🌙'], style: 'cryptic' },
+  brooding: { tag: ['...', '🖤', 'hm.', '🚬💨'], style: 'dry' },
+  golden:   { tag: ['!!!', '😆', '🐶', 'dude!!'], style: 'eager' },
+};
+
+function garnish(c, text, rng) {
+  if (rng.chance(0.45)) {
+    const v = VOICE[c.archetype];
+    return `${text} ${rng.pick(v.tag)}`;
+  }
+  return text;
+}
+
+// pick a line whose tier window contains t; prefer the steamiest available
+function pickTiered(bank, t, rng) {
+  const ok = bank.filter(e => (e.t ?? 0) <= t && t <= (e.max ?? 3));
+  if (!ok.length) return bank[0].s;
+  const maxT = Math.max(...ok.map(e => e.t ?? 0));
+  const best = ok.filter(e => (e.t ?? 0) === maxT);
+  const pool = rng.chance(0.7) ? best : ok;
+  return rng.pick(pool).s;
+}
+
+// ---------- player chat moves ----------
+export const MOVES = {
+  COMPLIMENT: { label: 'Compliment', emoji: '🌟' },
+  FLIRT:      { label: 'Flirt', emoji: '😉' },
+  TEASE:      { label: 'Tease', emoji: '😏' },
+  JOKE:       { label: 'Joke around', emoji: '🤪' },
+  ASK:        { label: 'Ask about them', emoji: '💬' },
+  SPICY:      { label: 'Get spicy', emoji: '🌶️' },
+  SERENADE:   { label: 'Serenade', emoji: '🎸' },
+};
+
+// What the player is heard saying, per move, tiered.
+const PLAYER_LINES = {
+  COMPLIMENT: [
+    { t: 0, s: 'You have a really great smile, you know that?' },
+    { t: 0, s: 'That color is amazing on you.' },
+    { t: 1, s: 'Every time I see you, you’re somehow better looking. It’s honestly rude.' },
+    { t: 2, s: 'You’re the best part of this whole beach, and the beach knows it.' },
+    { t: 3, s: 'I keep losing my train of thought around you. You’re a public hazard.' },
+  ],
+  FLIRT: [
+    { t: 0, s: 'So do you always look this good, or is today special?' },
+    { t: 0, s: 'If I buy you a smoothie, is that technically a date?' },
+    { t: 1, s: 'I was going to play it cool today. Then you showed up.' },
+    { t: 2, s: 'Fair warning: I’ve been thinking about you way more than I’ll admit out loud.' },
+    { t: 3, s: 'Come closer. The sunset’s better from right next to me.' },
+  ],
+  TEASE: [
+    { t: 0, s: 'Nice sandcastle. My five-year-old cousin builds better.' },
+    { t: 0, s: 'Bet you can’t beat me to the pier. Loser buys tacos.' },
+    { t: 1, s: 'You’re trouble. I can tell because I’m already in it.' },
+    { t: 2, s: 'Careful with those eyes, {pet}. Someone could get ideas.' },
+    { t: 3, s: 'Keep looking at me like that and we’re skipping the small talk.' },
+  ],
+  JOKE: [
+    { t: 0, s: 'Why don’t crabs give to charity? Because they’re shellfish.' },
+    { t: 0, s: 'I asked the ocean for dating advice. It just waved.' },
+    { t: 1, s: 'My horoscope said I’d meet someone incredible today. So... hi.' },
+    { t: 2, s: 'I told my friends about you. They’re sick of me already.' },
+  ],
+  ASK: [
+    { t: 0, s: 'So tell me something about you I don’t know yet.' },
+    { t: 1, s: 'What’s your story, really? I want the director’s cut.' },
+    { t: 2, s: 'What were you like before Beach City? I want to know all the chapters.' },
+  ],
+  SPICY: [
+    { t: 2, s: 'I had a dream about you. I’m not telling you the rating.' },
+    { t: 2, s: 'You, me, and a very private stretch of beach. Discuss.' },
+    { t: 3, s: 'I keep thinking about that swim. The water wasn’t the only thing making my heart race.' },
+    { t: 3, s: 'Whatever perfume you wear should be illegal. Come here and incriminate yourself.' },
+  ],
+  SERENADE: [
+    { t: 0, s: '*pulls out the guitar and plays a song written about {obj}*' },
+    { t: 2, s: '*plays something slow and low, eyes on {obj} the whole time*' },
+  ],
+};
+
+// NPC responses per move: success / fail, tiered.
+const NPC_RESPONSES = {
+  COMPLIMENT: {
+    ok: [
+      { t: 0, s: 'Oh stop it. (Do not actually stop.)' },
+      { t: 0, s: 'Flattery will get you... honestly, pretty far.' },
+      { t: 1, s: 'You keep saying things like that and I keep not hating it, {pet}.' },
+      { t: 2, s: 'You always know exactly what to say. It’s dangerous. I like danger.' },
+      { t: 3, s: 'Mmm. Say it again, slower.' },
+    ],
+    fail: [
+      { t: 0, s: 'Smooth. Do you rehearse that in the mirror?' },
+      { t: 0, s: 'Uh huh. Heard that one from three tourists this week.' },
+      { t: 1, s: 'Points for effort. Minus points for delivery.' },
+    ],
+  },
+  FLIRT: {
+    ok: [
+      { t: 0, s: 'Wow, bold. Lucky for you I like bold.' },
+      { t: 1, s: 'Careful, {pet}. Keep that up and I might start flirting back. ...That was me starting.' },
+      { t: 2, s: 'You’ve gotten good at this. Or I’ve gotten weak. Either way, keep going.' },
+      { t: 3, s: 'The things you do to me with just words should require a permit.' },
+    ],
+    fail: [
+      { t: 0, s: 'Does that line usually work? Genuine question, for science.' },
+      { t: 1, s: 'Hmm. Try again when the moon’s in a better house.' },
+      { t: 2, s: 'Not feeling it right this second. Read the room, {pet}.' },
+    ],
+  },
+  TEASE: {
+    ok: [
+      { t: 0, s: 'Oh, it is ON. You have no idea who you’re messing with.' },
+      { t: 1, s: 'You’re SO annoying. Anyway when are we hanging out again?' },
+      { t: 2, s: 'One day that smart mouth of yours is going to get you in wonderful trouble.' },
+      { t: 3, s: 'Brat. Come here.' },
+    ],
+    fail: [
+      { t: 0, s: 'Wooooow. Rude. I’m telling everyone.' },
+      { t: 1, s: 'Too far, {pet}. Buy my forgiveness with snacks.' },
+    ],
+  },
+  JOKE: {
+    ok: [
+      { t: 0, s: 'PFFF. That’s so bad it circled back to good.' },
+      { t: 0, s: 'I hate that I laughed. I hate it so much.' },
+      { t: 1, s: 'Okay, you’re funny. That’s deeply inconvenient for my whole plan of playing hard to get.' },
+      { t: 2, s: 'Nobody makes me laugh like you do. It’s a problem. Keep causing it.' },
+    ],
+    fail: [
+      { t: 0, s: '...I’m going to pretend I didn’t hear that.' },
+      { t: 0, s: 'Was that a joke or a cry for help?' },
+    ],
+  },
+  SPICY: {
+    ok: [
+      { t: 2, s: 'Well, well. Look who found their nerve. I was wondering when you would.' },
+      { t: 2, s: '*leans in close enough that you can feel the warmth* ...Noted.' },
+      { t: 3, s: 'You can’t just SAY things like that in public, {pet}. Now I have to think about it all day.' },
+      { t: 3, s: 'Meet me later. Bring that exact energy and nothing else.' },
+    ],
+    fail: [
+      { t: 0, s: 'Whoa there, tiger. Buy me dinner first.' },
+      { t: 1, s: 'Bold! Wrong moment, but bold. Rain check on that energy.' },
+      { t: 2, s: 'Mmm... tempting. But you’ll have to earn that mood back first.' },
+    ],
+  },
+  ASK: {
+    ok: [
+      { t: 0, s: 'You actually want to know? Okay. Okay okay okay. So—' },
+      { t: 1, s: 'Nobody ever asks me that. I like that you ask.' },
+      { t: 2, s: 'Come here, this is a sit-down story.' },
+    ],
+    fail: [
+      { t: 0, s: 'A mystery must maintain some mystery, {pet}.' },
+    ],
+  },
+  SERENADE: {
+    ok: [
+      { t: 0, s: '*forgets to breathe for the length of the chorus* ...You wrote that?' },
+      { t: 2, s: 'If you’re trying to ruin all other musicians for me, it’s working.' },
+      { t: 3, s: '*pulls you in by the collar the second the last chord fades*' },
+    ],
+    fail: [
+      { t: 0, s: 'The seagulls are filing a noise complaint. But the effort was cute.' },
+    ],
+  },
+};
+
+// friendly deflections when the player isn't their type
+const DEFLECT = [
+  'You’re sweet, and if I were into {plgender}s you’d be in real danger. Alas — I’m strictly a {wants} person.',
+  'Ha! {player}, you know you’re not my type — wrong department entirely. But I love the confidence.',
+  'Flirt received, respectfully returned to sender. I don’t date {plgender}s. BUT. I know people who would eat you alive. Want an introduction?',
+];
+
+const FACT_REVEALS = [
+  { key: 'job',      line: 'Me? I’m a {job}. Yes, it’s exactly as chaotic as it sounds.' },
+  { key: 'hometown', line: 'I’m {hometown}. Beach City just... kept me.' },
+  { key: 'loves',    line: 'What do I love? Easy: {loves}. Take notes, there will be a quiz.' },
+  { key: 'dislikes', line: 'Pet peeve gifts? {dislikes}. Bring me that and watch my face do a thing.' },
+  { key: 'quirk',    line: 'Confession time: I {quirktext}. Judge me. I dare you.' },
+  { key: 'type',     line: 'My type? I date {wants}. Extra points for {roleloves}.' },
+];
+
+function factCtx(c) {
+  const arch = archetypeOf(c);
+  const wants = c.attractedTo.map(g => GENDER_LABELS[g].toLowerCase() + (g === 'enby' ? ' folks' : g === 'man' ? '…men' : '…women')).join(', ')
+    .replace('…men', 'men').replace('…women', 'women');
+  return {
+    loves: arch.loves.join(' and '),
+    dislikes: arch.dislikes.join(' and '),
+    quirktext: quirkOf(c).text.replace(/^is |^has |^loves |^does |^puts |^reads |^writes |^rides |^dances |^collects |^swears /, m => m),
+    wants,
+    roleloves: arch.rolesLoved.join(' or ') + ' types',
+  };
+}
+
+// ---------- public API ----------
+
+export function availableMoves(c, player, rng) {
+  const tier = tierFor(c);
+  const interested = isInterested(c, player);
+  const moves = ['COMPLIMENT', 'JOKE', 'ASK'];
+  if (interested) {
+    moves.push('FLIRT', 'TEASE');
+    if (tier >= 2 && c.desire >= 30) moves.push('SPICY');
+    if (player.role === 'musician') moves.push('SERENADE');
+  } else {
+    moves.push('TEASE');
+  }
+  return rng.shuffle(moves).slice(0, 4).map(m => ({
+    type: m,
+    label: `${MOVES[m].emoji} ${MOVES[m].label}`,
+  }));
+}
+
+export function playerLineFor(c, player, move, rng) {
+  const tier = tierFor(c);
+  return fill(pickTiered(PLAYER_LINES[move], tier, rng), ctxFor(c, player, rng));
+}
+
+// Resolve a chat move → { success, npcText, emotion, dAff, dDes, special }
+export function resolveMove(c, player, move, rng, roleData) {
+  const arch = archetypeOf(c);
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng, factCtx(c));
+  const interested = isInterested(c, player);
+
+  // ASK: reveal facts, maybe trigger the trans-share moment
+  if (move === 'ASK') {
+    const unknown = FACT_REVEALS.filter(f => !c.known[f.key]);
+    if (c.trans && !c.transShared && tier >= 2 && rng.chance(0.5)) {
+      c.transShared = true;
+      addMemory(c, `${c.name} trusted you with ${pronounsOf(c).pos} story`);
+      return {
+        success: true, dAff: 8, dDes: 2, emotion: 'shy', special: 'transShare',
+        npcText: rng.pick(TRANS_SHARE_LINES),
+        replyChoices: TRANS_SHARE_REPLIES,
+      };
+    }
+    if (unknown.length) {
+      const f = rng.pick(unknown);
+      c.known[f.key] = true;
+      return {
+        success: true, dAff: 4, dDes: 1, emotion: 'happy', reveal: f.key,
+        npcText: garnish(c, fill(pickTiered(NPC_RESPONSES.ASK.ok, tier, rng), ctx) + ' ' + fill(f.line, ctx), rng),
+      };
+    }
+    // everything known → cozy memory talk
+    return {
+      success: true, dAff: 3, dDes: 1, emotion: 'happy',
+      npcText: garnish(c, fill(rng.pick([
+        'Remember {memory}? I think about that more than I admit.',
+        'Honestly you already know me better than most people ever bother to. It’s nice. Weird. Nice-weird.',
+        'Ask me anything. At this point you’ve unlocked the whole tragic backstory DLC.',
+      ]), ctx), rng),
+    };
+  }
+
+  // Flirt-type moves at an uninterested NPC → warm deflection, tiny friendship
+  if (!interested && (move === 'FLIRT' || move === 'SPICY' || move === 'SERENADE')) {
+    c.known.type = true;
+    return {
+      success: false, dAff: 1, dDes: 0, emotion: 'laugh', deflected: true,
+      npcText: fill(rng.pick(DEFLECT), { ...ctx, plgender: GENDER_LABELS[player.gender].toLowerCase(), wants: ctx.wants }),
+    };
+  }
+
+  // success roll — archetype receptivity × role chemistry × mood × repetition
+  // penalty × player stats × active buffs. Seduction is a build.
+  const recentSame = c.lastMoves.filter(m => m === move).length;
+  const statDef = STAT_DEFS.find(s => s.moves.includes(move));
+  let statLvl = statDef ? (player.stats?.[statDef.id] ?? 0) : 0;
+  if (statDef?.id === 'style' && player.buffs?.outfit) statLvl *= 2;
+  let p = 0.62
+    * (arch.receptivity[move] ?? 1)
+    * roleChemistry(c, player)
+    * (roleData?.moveBonus?.[move] ?? 1)
+    * (1 + c.mood * 0.08)
+    * (1 + statLvl * 0.03)
+    * (player.buffs?.courage > 0 ? 1.2 : 1)
+    * Math.max(0.35, 1 - recentSame * 0.22);
+  if (move === 'SPICY') p *= Math.min(1, c.desire / 55);
+  p = Math.max(0.08, Math.min(0.95, p));
+  const success = rng.chance(p);
+
+  c.lastMoves.push(move);
+  if (c.lastMoves.length > 4) c.lastMoves.shift();
+
+  const bank = NPC_RESPONSES[move][success ? 'ok' : 'fail'];
+  const npcText = garnish(c, fill(pickTiered(bank, tier, rng), ctx), rng);
+
+  const heatMul = 1 + tier * 0.25;
+  const mojoMul = (move === 'FLIRT' || move === 'SPICY') ? 1 + (player.mojo ?? 0) * 0.02 : 1;
+  let dAff = 0, dDes = 0, emotion;
+  if (success) {
+    const base = { COMPLIMENT: [3, 2], FLIRT: [3, 4], TEASE: [3, 3], JOKE: [4, 1], SPICY: [2, 8], SERENADE: [5, 4] }[move];
+    dAff = Math.round(base[0] * heatMul);
+    dDes = Math.round(base[1] * arch.desireGain * heatMul * mojoMul);
+    if (c.mood < 2 && rng.chance(0.4)) c.mood += 1;
+    // fulfilled an 'attention' desire?
+    const want = currentDesireOf(c);
+    if (want?.type === 'attention') {
+      const match = (want.id === 'want_words' && (move === 'COMPLIMENT' || move === 'FLIRT'))
+        || (want.id === 'want_laugh' && move === 'JOKE');
+      if (match) { dAff += 4; dDes += 3; c.currentDesire = null; }
+    }
+    emotion = move === 'SPICY' ? 'sultry' : move === 'JOKE' ? 'laugh' : tier >= 2 ? 'love' : 'happy';
+  } else {
+    dAff = move === 'SPICY' ? -3 : -1;
+    dDes = move === 'SPICY' ? -2 : 0;
+    if (rng.chance(0.35)) c.mood = Math.max(-2, c.mood - 1);
+    emotion = move === 'SPICY' ? 'annoyed' : 'smirk';
+  }
+  return { success, npcText, emotion, dAff, dDes };
+}
+
+// ---------- gifts ----------
+export function giftReaction(c, player, gift, rng) {
+  const arch = archetypeOf(c);
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng, { gift: gift.name.toLowerCase() });
+  const want = currentDesireOf(c);
+  const wanted = want?.type === 'gift' && want.cat === gift.cat;
+
+  if (gift.cat === 'spicy' && (tier < 2 || !isInterested(c, player))) {
+    return {
+      quality: 'toosoon', dAff: -4, dDes: 1, emotion: 'annoyed',
+      text: fill(rng.pick([
+        'A {gift}?! We are NOT there yet, {pet}. Sliding this back across the table. Slowly. Maintaining eye contact.',
+        'Wow. A {gift}. Someone’s confident. Earn it first.',
+      ]), ctx),
+    };
+  }
+
+  let quality = 'meh';
+  if (arch.loves.includes(gift.cat)) quality = 'love';
+  else if (arch.likes.includes(gift.cat)) quality = 'like';
+  else if (arch.dislikes.includes(gift.cat)) quality = 'dislike';
+
+  const diminish = Math.max(0.3, 1 - c.giftsToday * 0.35);
+  const spicyKick = gift.cat === 'spicy' ? 1.6 : 1;
+  const table = {
+    love:    { dAff: 10, dDes: 6, emotion: 'love' },
+    like:    { dAff: 6,  dDes: 3, emotion: 'happy' },
+    meh:     { dAff: 2,  dDes: 1, emotion: 'neutral' },
+    dislike: { dAff: -3, dDes: 0, emotion: 'annoyed' },
+  }[quality];
+
+  let dAff = Math.round(table.dAff * diminish);
+  let dDes = Math.round(table.dDes * diminish * spicyKick * arch.desireGain);
+  let bonus = '';
+  if (wanted) {
+    dAff += 6; dDes += 5;
+    c.currentDesire = null;
+    bonus = ' ' + fill(rng.pick([
+      'WAIT. How did you know I wanted exactly this?! You actually listen to me. That’s so unfair.',
+      'Shut UP. I literally just mentioned this. Okay, you get points. So many points.',
+    ]), ctx);
+    if (c.mood < 2) c.mood += 1;
+  }
+  c.giftsToday += 1;
+  c.known.loves = c.known.loves || quality === 'love';
+  c.known.dislikes = c.known.dislikes || quality === 'dislike';
+  if (quality === 'love') addMemory(c, `you gave ${c.name} a ${gift.name.toLowerCase()}`);
+
+  const banks = {
+    love: [
+      { t: 0, s: 'A {gift}?! Okay you’re officially my favorite person today.' },
+      { t: 1, s: 'You got me a {gift}... I’m keeping it forever and you can’t stop me.' },
+      { t: 2, s: 'A {gift}. You’re dangerously good at this, {pet}. Come here.' },
+      { t: 3, s: 'You keep spoiling me like this and I’ll have to find... creative ways to thank you.' },
+    ],
+    like: [
+      { t: 0, s: 'Aww, a {gift}! That’s really sweet of you.' },
+      { t: 1, s: 'A {gift}! Look at you, paying attention.' },
+    ],
+    meh: [
+      { t: 0, s: 'Oh! A {gift}. Thanks! It’s... yeah! Thank you.' },
+      { t: 0, s: 'A {gift}, huh. It’s the thought that counts, and I can tell there was... a thought.' },
+    ],
+    dislike: [
+      { t: 0, s: 'A {gift}? Hm. Do you... know me? Like, at all?' },
+      { t: 0, s: 'I’m going to smile politely now. This is me smiling politely at a {gift}.' },
+    ],
+  };
+  const spicyBank = [
+    { t: 2, s: 'Oh. OH. A {gift}. *checks over both shoulders* You’re trying to get us talked about, aren’t you. I love it.' },
+    { t: 3, s: 'A {gift}... *slow smile* Someone’s been thinking ahead. Smart. Very smart.' },
+  ];
+  const bank = gift.cat === 'spicy' && quality !== 'dislike' ? spicyBank : banks[quality];
+  return {
+    quality, dAff, dDes, emotion: table.emotion,
+    text: garnish(c, fill(pickTiered(bank, tier, rng), ctx), rng) + bonus,
+  };
+}
+
+// ---------- dates ----------
+export function dateNarration(c, player, act, rng) {
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng);
+  const scene = tier >= 2 && act.heatScene ? act.heatScene : act.scene;
+  return fill(scene, ctx);
+}
+
+export function dateReaction(c, player, act, rng) {
+  const arch = archetypeOf(c);
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng, { act: act.name.toLowerCase() });
+  const want = currentDesireOf(c);
+  const wanted = want?.type === 'activity' && want.act === act.id;
+  const loved = arch.actLove.includes(act.id);
+  const meh = arch.actMeh.includes(act.id);
+  const roleBoost = player.roleData?.actBonus?.includes(act.id) ? 1.2 : 1;
+
+  let mult = loved ? 1.5 : meh ? 0.55 : 1;
+  let dAff = Math.round(act.aff * mult * roleBoost);
+  let dDes = Math.round(act.des * mult * roleBoost * arch.desireGain * (1 + tier * 0.15));
+  let bonus = '';
+  if (wanted) {
+    dAff += 6; dDes += 6; c.currentDesire = null;
+    bonus = ' ' + fill('“I’ve been dying to do this. You remembered. You actually remembered.”', ctx);
+    if (c.mood < 2) c.mood += 1;
+  }
+  addMemory(c, `that ${act.name.toLowerCase()} on day ${player.day}`);
+
+  const lines = loved ? [
+    { t: 0, s: '“Okay THAT was perfect. Top five days, easily.”' },
+    { t: 2, s: '“I don’t want tonight to end, {pet}. Just so you know.”' },
+    { t: 3, s: '“Next time we do that, we’re not saying goodnight after.”' },
+  ] : meh ? [
+    { t: 0, s: '“That was... fine! Fun-adjacent. The company saved it.”' },
+  ] : [
+    { t: 0, s: '“That was really fun. I mean it.”' },
+    { t: 2, s: '“Good date, {pet}. You’re getting suspiciously good at those.”' },
+  ];
+  return {
+    dAff, dDes, emotion: loved ? (tier >= 2 ? 'sultry' : 'love') : meh ? 'neutral' : 'happy',
+    text: garnish(c, fill(pickTiered(lines, tier, rng), ctx), rng) + bonus,
+  };
+}
+
+// ---------- proactive texts ----------
+export function proactiveText(c, player, rng, kind) {
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng);
+  if (kind === 'desireHint') {
+    const want = currentDesireOf(c);
+    if (!want) return null;
+    c.desireHinted = true;
+    return fill(want.hint, ctx);
+  }
+  if (kind === 'miss') {
+    return fill(pickTiered([
+      { t: 0, s: 'Hey stranger. Still alive over there? 🙄' },
+      { t: 1, s: 'So we’re just... not talking now? Cool cool cool. (Text me back.)' },
+      { t: 2, s: 'I walked past our smoothie place today and got irrationally sad. Fix this, {pet}.' },
+      { t: 3, s: 'My bed is annoyingly big and my phone is annoyingly quiet. Handle it.' },
+    ], tier, rng), ctx);
+  }
+  if (kind === 'flirt') {
+    return fill(pickTiered([
+      { t: 0, s: 'Saw someone do a spectacular wipeout at the beach and thought of you 😇' },
+      { t: 1, s: 'You crossed my mind today. Twice. Don’t let it go to your head.' },
+      { t: 2, s: 'Thinking about you. That’s it. That’s the text.' },
+      { t: 2, s: 'What are you wearing right now? Wait— don’t answer. Bad question. (Answer it.)' },
+      { t: 3, s: 'Last night’s dream featured you prominently. My subconscious has excellent taste and zero shame.' },
+    ], tier, rng), ctx);
+  }
+  if (kind === 'jealous') {
+    return fill(pickTiered([
+      { t: 1, s: 'A little bird told me you were at the boardwalk with someone today. Interesting. Very interesting. 🤨' },
+      { t: 2, s: 'So who was that today, hm? Should I be sharpening anything?' },
+    ], tier, rng), ctx);
+  }
+  if (kind === 'partner') {
+    return fill(rng.pick([
+      'Good morning, trouble. Dreamed about you. Again. This is getting embarrassing 💘',
+      'Reminder: you’re mine and I have excellent taste. Come by later 😘',
+      'The bonfire crew keeps asking about us. I just smile. They HATE it. Come make it worse with me?',
+    ]), ctx);
+  }
+  return null;
+}
+
+export function greeting(c, player, rng) {
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng);
+  const moody = c.mood < 0;
+  if (moody) {
+    return garnish(c, fill(rng.pick([
+      'Oh. It’s you. ...Sorry, rough day. You get five minutes to change my mood.',
+      'Hmph. I was wondering if you’d show up. The bar was on the floor and yet.',
+    ]), ctx), rng);
+  }
+  return garnish(c, fill(pickTiered([
+    { t: 0, s: 'Oh hey! {player}, right? From the boardwalk.' },
+    { t: 0, s: 'Well hello there. Back for more Beach City sunshine?' },
+    { t: 1, s: 'There you are! I was literally just thinking about you. Don’t make it weird.' },
+    { t: 2, s: 'Hey you. C’mere. I saved you a spot. It’s next to me. The spot is me.' },
+    { t: 3, s: 'Finally. I was about to start missing you out loud, and nobody wants that. Get over here, {pet}.' },
+  ], tier, rng), ctx), rng);
+}
+
+// first meeting at the boardwalk
+export function meetLine(c, player, rng) {
+  const ctx = ctxFor(c, player, rng, factCtx(c));
+  return garnish(c, fill(rng.pick([
+    'Hey — {player}, was it? I’m {name}. I’ve seen you around the boardwalk. You have main-character energy, it’s very suspicious.',
+    'New face! Or... new-ish. I’m {name}. Welcome to the best worst beach town on the coast.',
+    'You’re the {plrole} everyone keeps mentioning, right? I’m {name}. Intrigued, honestly.',
+  ]), { ...ctx, plrole: player.roleLabel?.toLowerCase() ?? 'newcomer' }), rng);
+}
+
+// ---------- phone: outbound texts ----------
+// The player texts an NPC remotely; they reply in kind (tier-appropriate).
+const TEXT_BANKS = {
+  sweet: {
+    out: [
+      { t: 0, s: 'Hope your day is as nice as you are 🌞' },
+      { t: 1, s: 'Saw a dog on the boardwalk wearing sunglasses and needed you to know.' },
+      { t: 2, s: 'Random reminder that you make this whole town better. That’s all. Carry on.' },
+    ],
+    ok: [
+      { t: 0, s: 'Okay that was disgustingly cute. Who gave you the right 🥹' },
+      { t: 1, s: 'You can’t just SEND that while I’m at work. My coworkers are asking why I’m smiling.' },
+      { t: 2, s: 'Keep this up and I’m keeping you, {pet} 💛' },
+    ],
+  },
+  flirty: {
+    out: [
+      { t: 1, s: 'Thinking about your smile. It’s ruining my productivity. Invoice incoming.' },
+      { t: 2, s: 'Quick question: are you free tonight, or are you free tonight?' },
+      { t: 3, s: 'I’d text you something smooth but you already know what you do to me.' },
+    ],
+    ok: [
+      { t: 1, s: 'Smooth operator over here 📱🔥 Fine. You get one (1) blush.' },
+      { t: 2, s: 'You’re lucky you’re charming. And that I like being flustered. 😉' },
+      { t: 3, s: 'Mmm. Save that thought for when you see me, {pet}.' },
+    ],
+  },
+  spicy: {
+    out: [
+      { t: 2, s: 'Wear that swimsuit tonight. You know the one. 🌶️' },
+      { t: 2, s: 'Currently thinking about our last swim. And what almost happened after.' },
+      { t: 3, s: 'The things I’d whisper if you were here right now... your battery would die of embarrassment.' },
+    ],
+    ok: [
+      { t: 2, s: 'OH so we’re sending THOSE kinds of texts now?? *fans self* ...continue.' },
+      { t: 2, s: 'I read that three times. Do NOT tell anyone. Come find me later 🌶️' },
+      { t: 3, s: 'You absolute menace. My imagination is now fully booked for the day. Yours. Later. No excuses.' },
+    ],
+    fail: [
+      { t: 0, s: 'Bold text for someone who hasn’t even taken me to dinner this week 😌 Earn it.' },
+      { t: 2, s: 'Mmm, spicy. Wrong mood today though — warm me up in person first.' },
+    ],
+  },
+  invite: {
+    out: [
+      { t: 1, s: 'Boardwalk. Twenty minutes. I’ll be the one looking for you.' },
+      { t: 2, s: 'Drop everything. I miss your face. Come find me? 📍' },
+    ],
+    ok: [
+      { t: 1, s: 'Ha! Demanding. Luckily for you I was bored. OMW 🛵' },
+      { t: 2, s: 'You had me at “I miss your face”. Give me 15, {pet} 💨' },
+    ],
+    fail: [
+      { t: 0, s: 'Can’t today, cutie — life is loud. Rain check? Don’t pout. I can FEEL you pouting.' },
+    ],
+  },
+};
+
+export function textExchange(c, player, kind, rng) {
+  const tier = tierFor(c);
+  const ctx = ctxFor(c, player, rng);
+  const bank = TEXT_BANKS[kind];
+  const out = fill(pickTiered(bank.out, tier, rng), ctx);
+
+  if (kind === 'sweet') {
+    return { out, reply: fill(pickTiered(bank.ok, tier, rng), ctx), dAff: 3, dDes: 1, accepted: true };
+  }
+  if (kind === 'flirty') {
+    const ok = rng.chance(0.75 + c.mood * 0.05);
+    return ok
+      ? { out, reply: fill(pickTiered(bank.ok, tier, rng), ctx), dAff: 3, dDes: 4, accepted: true }
+      : { out, reply: fill(pickTiered(TEXT_BANKS.spicy.fail, tier, rng), ctx), dAff: 0, dDes: 0, accepted: false };
+  }
+  if (kind === 'spicy') {
+    const ok = tier >= 2 && c.desire >= 35 && rng.chance(0.7 + c.mood * 0.05);
+    return ok
+      ? { out, reply: fill(pickTiered(bank.ok, tier, rng), ctx), dAff: 2, dDes: 9, accepted: true }
+      : { out, reply: fill(pickTiered(bank.fail, tier, rng), ctx), dAff: -2, dDes: -1, accepted: false };
+  }
+  // invite
+  const ok = c.mood >= 0 && rng.chance(0.55 + c.affection / 200 + c.mood * 0.1);
+  return ok
+    ? { out, reply: fill(pickTiered(bank.ok, tier, rng), ctx), dAff: 2, dDes: 2, accepted: true }
+    : { out, reply: fill(pickTiered(bank.fail, tier, rng), ctx), dAff: 0, dDes: 0, accepted: false };
+}
