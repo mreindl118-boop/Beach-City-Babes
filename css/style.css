@@ -302,3 +302,23 @@ h1 span { color: var(--gold); }
 #chat-input:focus { box-shadow: 0 0 0 3px rgba(255,93,143,0.25); }
 #chat-input:disabled { opacity: 0.6; border-color: #d9c3cc; }
 #chat-send { border-radius: 999px; padding: 12px 22px; flex-shrink: 0; }
+
+/* ---------- overworld map + day/night ---------- */
+body.night { --pink: #ff7aa8; }
+body.night #game-screen { background:
+  linear-gradient(180deg, #2a2350 0%, #3b2a63 55%, #4a2a6b 100%); }
+#topbar { transition: background 0.6s ease; }
+body.night #topbar { background: rgba(40,32,70,0.92); color: #ffe9f1; }
+body.night .iconbtn { color: #ffe9f1; }
+#daytime { transition: color 0.5s ease; }
+.map-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.map-loc {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
+  border: 2px solid #ffd9e6; background: #fff; border-radius: 14px; padding: 12px 6px;
+  font-weight: 600; color: var(--ink); text-align: center;
+}
+.map-loc .map-emoji { font-size: 30px; }
+.map-loc .map-name { font-size: 13px; }
+.map-loc .map-who { font-size: 10.5px; color: #8a6b78; line-height: 1.2; }
+.map-loc.here { outline: 3px solid var(--gold); }
+.map-loc.closed { opacity: 0.4; cursor: not-allowed; }

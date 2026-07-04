@@ -16,6 +16,10 @@ import {
   finaleSVG, spawnFireworks, describeCharacter, shade,
 } from './art.js';
 import {
+  PHASES, phaseOf, phaseInfo, isNightPhase, LOCATIONS, locationById,
+  isOpen, whoIsAt, npcLocation, ensureSchedule,
+} from './world.js';
+import {
   resolveTyped, classifyChoice, chatPersona, giftReaction,
   dateNarration, dateReaction, proactiveText, greeting, meetLine,
   textExchange, fill,
@@ -49,13 +53,20 @@ function newState(playerDef, slot) {
   const usedNames = new Set([playerDef.name]);
   const npcs = [generateCharacter(rng, usedNames), generateCharacter(rng, usedNames), generateCharacter(rng, usedNames)];
   npcs.forEach(c => rollDesire(c, rng));
+  const worldSeed = rng.int(1, 1_000_000_000);
+  npcs.forEach(c => ensureSchedule(c, worldSeed));
+  // start the day co-located with someone, so the first encounter just happens
+  const startLoc = npcLocation(npcs[0], phaseOf(9), worldSeed);
   return {
-    v: 2,
+    v: 3,
     slot,
+    worldSeed,
     player: {
       ...playerDef,
       coins: ROLES.find(r => r.id === playerDef.role).coins,
       day: 1, hour: 9, heartsWon: 0,
+      location: startLoc,
+      reputation: 0,      // town-wide standing; bad public moves sink it
       stats: { ...ROLE_STATS[playerDef.role] },
       mojo: 0,             // earned sexual confidence — amplifies desire gains
       inv: {},             // boostId -> count
@@ -96,7 +107,18 @@ function migrate(data) {
     c.warnings ??= 0;
     c.walkedToday ??= false;
   }
+  // overworld fields
+  data.worldSeed ??= (hashStr(data.slot + ':' + (data.npcs?.[0]?.id || 'x')) >>> 0) || 12345;
+  p.location ??= 'beach';
+  p.reputation ??= 0;
+  for (const c of data.npcs ?? []) ensureSchedule(c, data.worldSeed);
   return data;
+}
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }
 
 function save() {
@@ -212,11 +234,21 @@ function startGame() {
   show('#game-screen');
   lastHeat = -1;
   activeScene = null; awaitingReply = false;
+  // focus whoever you're actually with; if your last person isn't here, pick present
+  if (!isPresent(active())) {
+    const here = presentNPCs();
+    const pick = here.find(c => isInterested(c, playerForDialogue())) || here[0];
+    if (pick) S.activeId = pick.id;
+  }
   renderAll();
   const c = active();
-  if (!(S.logs[c.id]?.length)) npcSay(greeting(c, playerForDialogue(), rng));
-  else renderLog();
-  maybeScene(c);
+  if (isPresent(c)) {
+    if (!(S.logs[c.id]?.length)) npcSay(greeting(c, playerForDialogue(), rng));
+    else renderLog();
+    maybeScene(c);
+  } else {
+    renderLog();
+  }
   refreshChatBar();
   flushTextsBadge();
 }
@@ -229,9 +261,14 @@ function renderAll() {
 }
 
 function renderTopbar() {
+  const ph = phaseInfo(phaseOf(S.player.hour));
+  const loc = locationById(S.player.location) || LOCATIONS[0];
   $('#coins').textContent = `🪙 ${S.player.coins}`;
-  $('#daytime').textContent = `☀️ Day ${S.player.day} · ${S.player.hour}:00`;
-  $('#hearts-won').textContent = `💛 ${S.player.heartsWon}`;
+  $('#daytime').textContent = `${ph.emoji} ${ph.label} · Day ${S.player.day}`;
+  $('#hearts-won').textContent = `${loc.emoji} ${loc.name}`;
+  // tint the world by time of day
+  document.documentElement.style.setProperty('--phase-tint', ph.tint);
+  document.body.classList.toggle('night', isNightPhase(ph.id));
   const st = S.player.stats;
   const buffIcons = [
     S.player.buffs.courage > 0 ? '🥃' : '',
@@ -533,31 +570,114 @@ function goGroupDate(c, m) {
   }, 600);
 }
 
+// ---------------- overworld / presence ----------------
+const curPhase = () => phaseOf(S.player.hour);
+const presentNPCs = () => whoIsAt(S.npcs, S.player.location, curPhase(), S.worldSeed);
+function isPresent(c) {
+  return c && !c.walkedToday && npcLocation(c, curPhase(), S.worldSeed) === S.player.location;
+}
+
+// Travel to a location: costs an hour, then you meet whoever's there now.
+function travelTo(locId) {
+  const loc = locationById(locId);
+  if (!loc) return;
+  closeModal();
+  S.player.location = locId;
+  advanceTime(1);
+  arrive(loc, true);
+}
+
+// Resolve who's around and update the chat focus + system message.
+function arrive(loc, announce) {
+  const here = presentNPCs();
+  // small chance to meet someone brand new while you're out and about
+  let met = null;
+  if (!loc.home && !loc.clinic && S.npcs.length < 8 && rng.chance(loc.adult ? 0.15 : 0.3)) {
+    const used = new Set(S.usedNames);
+    met = generateCharacter(rng, used);
+    S.usedNames = [...used];
+    rollDesire(met, rng);
+    ensureSchedule(met, S.worldSeed);
+    met.schedule[curPhase()] = loc.id; // they're here right now
+    S.npcs.push(met);
+    here.push(met);
+  }
+  if (announce) {
+    const names = here.map(c => c.name);
+    narrate(`${loc.emoji} You head to ${loc.name}. ${loc.vibe[0].toUpperCase() + loc.vibe.slice(1)}.` +
+      (names.length ? ` ${listNames(names)} ${names.length > 1 ? 'are' : 'is'} here.` : ' Nobody around right now.'));
+  }
+  // focus someone present (prefer whoever you were already with)
+  if (!isPresent(active())) {
+    const pick = here.find(c => isInterested(c, playerForDialogue())) || here[0];
+    if (pick) { S.activeId = pick.id; lastHeat = -1; }
+  }
+  if (met) setTimeout(() => { switchTo(met.id); npcSay(meetLine(met, playerForDialogue(), rng)); }, 300);
+  renderAll();
+  refreshChatBar();
+  save();
+}
+
+function listNames(names) {
+  if (names.length <= 2) return names.join(' and ');
+  return names.slice(0, -1).join(', ') + ', and ' + names[names.length - 1];
+}
+
+function openMap() {
+  const phase = curPhase();
+  const body = `
+    <h3>🗺️ Beach City — ${phaseInfo(phase).emoji} ${phaseInfo(phase).label}</h3>
+    <p class="modal-text">Travel costs an hour. You'll meet whoever's there right now.</p>
+    <div class="map-grid">
+      ${LOCATIONS.map(l => {
+        const open = isOpen(l, phase);
+        const here = open ? whoIsAt(S.npcs, l.id, phase, S.worldSeed) : [];
+        const you = l.id === S.player.location;
+        return `<button class="map-loc ${open ? '' : 'closed'} ${you ? 'here' : ''}" data-loc="${l.id}" ${open ? '' : 'disabled'}>
+          <span class="map-emoji">${l.emoji}</span>
+          <span class="map-name">${l.name}</span>
+          <span class="map-who">${you ? '📍 you’re here' : open ? (here.length ? '👥 ' + here.map(c => c.name).join(', ') : '—') : '🔒 closed now'}</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+  openModal(body);
+  $('#modal-body').querySelectorAll('[data-loc]').forEach(b => b.onclick = () => travelTo(b.dataset.loc));
+}
+
 // ---------------- typed chat ----------------
 let activeScene = null; // { choices, handler } while a pivotal scene is open
 let awaitingReply = false;
 
-// Contextual quick-chips above the input (Heart-to-heart / Come clean), plus
-// a note when the NPC has walked off.
+// Contextual chip row above the input: who else is here to approach, plus
+// Heart-to-heart / Come clean. Input is gated by whether you're actually with
+// someone — you can't chat with people who aren't at your location.
 function refreshChatBar() {
   const c = active();
   const input = $('#chat-input');
-  const gone = c.walkedToday && !c.partner;
-  // input stays usable during scenes so answers can be typed; only truly
-  // blocked while a reply is in flight or the NPC has left
-  input.disabled = awaitingReply || gone;
-  input.placeholder = gone ? `${c.name} walked off — find them elsewhere later.`
-    : activeScene ? 'Type your answer, or tap a choice above…'
-    : awaitingReply ? '…' : `Say something to ${c.name}…`;
-  if (activeScene) { $('#chat-chips').innerHTML = ''; return; }
-  const tier = tierFor(c);
+  const here = presentNPCs();
+  const withThem = isPresent(c);
+  input.disabled = awaitingReply || (!withThem && !activeScene);
+  input.placeholder = activeScene ? 'Type your answer, or tap a choice above…'
+    : awaitingReply ? '…'
+    : withThem ? `Say something to ${c.name}…`
+    : here.length ? 'Tap someone below to talk to them.'
+    : 'Nobody here — 🗺️ Travel to find people.';
+
   const chips = [];
-  if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none')
-    chips.push('<button class="chip mini action" data-chip="dtr">💕 Define the relationship</button>');
-  if ((c.guilt ?? 0) > 0 && (c.agreement === 'exclusive' || tier >= 2))
-    chips.push('<button class="chip mini action" data-chip="confess">😳 Come clean</button>');
-  $('#chat-chips').innerHTML = chips.join('');
-  $('#chat-chips').querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
+  // approach anyone else present
+  for (const o of here) if (o.id !== c.id)
+    chips.push(`<button class="chip mini action" data-approach="${o.id}">💬 ${o.name}</button>`);
+  if (!activeScene && withThem) {
+    const tier = tierFor(c);
+    if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none')
+      chips.push('<button class="chip mini action" data-chip="dtr">💕 Define the relationship</button>');
+    if ((c.guilt ?? 0) > 0 && (c.agreement === 'exclusive' || tier >= 2))
+      chips.push('<button class="chip mini action" data-chip="confess">😳 Come clean</button>');
+  }
+  const bar = $('#chat-chips');
+  bar.innerHTML = chips.join('');
+  bar.querySelectorAll('[data-approach]').forEach(b => b.onclick = () => switchTo(b.dataset.approach));
+  bar.querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
     if (b.dataset.chip === 'dtr') { playerSay('Hey… can we talk about us?'); setTimeout(() => sceneDTR(c, false), 420); }
     else { playerSay('There’s something I need to tell you.'); setTimeout(() => sceneConfront(c, true), 420); }
   });
@@ -949,42 +1069,6 @@ function advanceTime(h) {
   renderTopbar();
 }
 
-function openBoardwalk() {
-  const canMeet = S.npcs.length < 6;
-  const body = `
-    <h3>🎡 The Boardwalk</h3>
-    <p class="modal-text">Neon, salt air, and possibility.</p>
-    <div class="stack">
-      ${canMeet ? '<button class="btn primary" id="bw-meet">👋 Strike up a conversation (1h)</button>' : '<p class="modal-text">Your dance card is pretty full already.</p>'}
-      <button class="btn" id="bw-stroll">🚶 People-watch (1h, free smiles)</button>
-    </div>`;
-  openModal(body);
-  const meetBtn = $('#bw-meet');
-  if (meetBtn) meetBtn.onclick = () => {
-    closeModal();
-    advanceTime(1);
-    const used = new Set(S.usedNames);
-    const c = generateCharacter(rng, used);
-    S.usedNames = [...used];
-    rollDesire(c, rng);
-    S.npcs.push(c);
-    S.activeId = c.id;
-    lastHeat = -1;
-    renderAll();
-    npcSay(meetLine(c, playerForDialogue(), rng));
-    save();
-  };
-  $('#bw-stroll').onclick = () => {
-    closeModal();
-    advanceTime(1);
-    narrate(rng.pick([
-      '🎡 You watch the ferris wheel spin and eat a churro. Life is okay.',
-      '🌊 A pelican steals a tourist’s hot dog. You applaud.',
-      '🎶 A street band plays something that makes everyone walk in rhythm.',
-    ]));
-  };
-}
-
 function openRoster() {
   const pl = playerForDialogue();
   const body = `
@@ -993,10 +1077,12 @@ function openRoster() {
       ${S.npcs.map(c => {
         const t = tierFor(c);
         const int = isInterested(c, pl);
+        const loc = locationById(npcLocation(c, curPhase(), S.worldSeed));
+        const hereNow = isPresent(c);
         return `<button class="roster-row ${c.id === S.activeId ? 'on' : ''}" data-npc="${c.id}">
           <b>${c.name}</b> <span class="chip mini">${archetypeOf(c).label}</span>
           <span class="chip mini tier">${tierLabel(t)}${c.partner ? ' 💘' : c.known.type && !int ? ' 🤝' : ''}</span>
-          <span class="roster-meters">♥${c.affection} 🔥${c.desire}</span>
+          <span class="roster-meters">${hereNow ? '📍here' : (loc ? loc.emoji + loc.name : '')} · ♥${c.affection} 🔥${c.desire}</span>
         </button>`;
       }).join('')}
     </div>`;
@@ -1017,12 +1103,16 @@ function switchTo(id) {
   const c = active();
   // deliver unread texts from them into chat
   const mine = S.texts.filter(t => t.npcId === id && !t.read);
+  const here = isPresent(c);
   if (mine.length) {
     mine.forEach(t => { t.read = true; log('npc', `📱 ${t.text}`); });
-  } else if (!(S.logs[id]?.length)) {
+  } else if (here && !(S.logs[id]?.length)) {
     npcSay(greeting(c, playerForDialogue(), rng));
+  } else if (!here) {
+    const loc = locationById(npcLocation(c, curPhase(), S.worldSeed));
+    narrate(`You're not with ${c.name} right now — ${c.name} is at ${loc ? loc.name : 'somewhere else'}. Travel there, or text ${pronounsOf(c).obj}.`);
   }
-  maybeScene(c); // pending drama meets you at the door
+  if (here) maybeScene(c); // pending drama only plays out face to face
   refreshChatBar();
   flushTextsBadge();
   save();
@@ -1177,7 +1267,7 @@ function bindUI() {
       if (a === 'items') openInventory();
       if (a === 'phone') openPhone();
       if (a === 'sleep') doSleep();
-      if (a === 'boardwalk') openBoardwalk();
+      if (a === 'travel') openMap();
       if (a === 'roster') openRoster();
     };
   });
