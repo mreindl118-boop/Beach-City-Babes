@@ -311,14 +311,14 @@ body.night #game-screen { background:
 body.night #topbar { background: rgba(40,32,70,0.92); color: #ffe9f1; }
 body.night .iconbtn { color: #ffe9f1; }
 #daytime { transition: color 0.5s ease; }
-.map-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.map-loc {
-  display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
-  border: 2px solid #ffd9e6; background: #fff; border-radius: 14px; padding: 12px 6px;
-  font-weight: 600; color: var(--ink); text-align: center;
-}
-.map-loc .map-emoji { font-size: 30px; }
-.map-loc .map-name { font-size: 13px; }
-.map-loc .map-who { font-size: 10.5px; color: #8a6b78; line-height: 1.2; }
-.map-loc.here { outline: 3px solid var(--gold); }
-.map-loc.closed { opacity: 0.4; cursor: not-allowed; }
+#modal-body.map-modal { max-width: 640px; }
+.map-wrap { border-radius: 16px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
+.citymap { width: 100%; height: auto; display: block; }
+.map-hint { text-align: center; margin-top: 10px; }
+.map-hot { cursor: pointer; }
+.map-hot .hot-target { transition: fill 0.15s ease; }
+.map-hot:hover .hot-target, .map-hot:focus .hot-target { fill: #ffffff33; outline: none; }
+.map-hot:hover { filter: drop-shadow(0 3px 6px rgba(0,0,0,0.35)); }
+.map-hot.closed { cursor: not-allowed; opacity: 0.55; }
+.here-pulse { animation: herepulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes herepulse { 0%,100% { transform: scale(0.9); opacity: 0.18; } 50% { transform: scale(1.15); opacity: 0.3; } }

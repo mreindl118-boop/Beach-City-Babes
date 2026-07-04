@@ -19,6 +19,7 @@ import {
   PHASES, phaseOf, phaseInfo, isNightPhase, LOCATIONS, locationById,
   isOpen, whoIsAt, npcLocation, ensureSchedule,
 } from './world.js';
+import { mapSVG } from './mapart.js';
 import {
   resolveTyped, classifyChoice, chatPersona, giftReaction,
   dateNarration, dateReaction, proactiveText, greeting, meetLine,
@@ -625,23 +626,18 @@ function listNames(names) {
 
 function openMap() {
   const phase = curPhase();
+  const presenceByLoc = {};
+  for (const l of LOCATIONS) presenceByLoc[l.id] = isOpen(l, phase) ? whoIsAt(S.npcs, l.id, phase, S.worldSeed) : [];
+  const here = presenceByLoc[S.player.location] || [];
   const body = `
-    <h3>🗺️ Beach City — ${phaseInfo(phase).emoji} ${phaseInfo(phase).label}</h3>
-    <p class="modal-text">Travel costs an hour. You'll meet whoever's there right now.</p>
-    <div class="map-grid">
-      ${LOCATIONS.map(l => {
-        const open = isOpen(l, phase);
-        const here = open ? whoIsAt(S.npcs, l.id, phase, S.worldSeed) : [];
-        const you = l.id === S.player.location;
-        return `<button class="map-loc ${open ? '' : 'closed'} ${you ? 'here' : ''}" data-loc="${l.id}" ${open ? '' : 'disabled'}>
-          <span class="map-emoji">${l.emoji}</span>
-          <span class="map-name">${l.name}</span>
-          <span class="map-who">${you ? '📍 you’re here' : open ? (here.length ? '👥 ' + here.map(c => c.name).join(', ') : '—') : '🔒 closed now'}</span>
-        </button>`;
-      }).join('')}
-    </div>`;
-  openModal(body);
-  $('#modal-body').querySelectorAll('[data-loc]').forEach(b => b.onclick = () => travelTo(b.dataset.loc));
+    <div class="map-wrap">${mapSVG({ phase, playerLoc: S.player.location, presenceByLoc })}</div>
+    <p class="modal-text map-hint">Tap a place to travel there (costs an hour). You'll meet whoever's around.
+      ${here.length ? `Here now: <b>${here.map(c => c.name).join(', ')}</b>.` : ''}</p>`;
+  openModal(body, 'map-modal');
+  $('#modal-body').querySelectorAll('.map-hot:not(.closed)').forEach(g => {
+    g.onclick = () => travelTo(g.dataset.loc);
+    g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); travelTo(g.dataset.loc); } };
+  });
 }
 
 // ---------------- typed chat ----------------
@@ -1192,8 +1188,10 @@ function doSleepAfterFinale() {
 }
 
 // ---------------- modal / toast ----------------
-function openModal(html) {
-  $('#modal-body').innerHTML = html;
+function openModal(html, cls = '') {
+  const body = $('#modal-body');
+  body.className = 'panel' + (cls ? ' ' + cls : '');
+  body.innerHTML = html;
   $('#modal').classList.remove('hidden');
 }
 function closeModal() { $('#modal').classList.add('hidden'); }
