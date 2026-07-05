@@ -113,6 +113,7 @@ function migrate(data) {
     c.turnoffs ??= ['crude', 'pushy'];
     c.warnings ??= 0;
     c.walkedToday ??= false;
+    c.attractedTo = ['man', 'woman', 'enby']; // everyone's pansexual now
   }
   // overworld fields
   data.worldSeed ??= (hashStr(data.slot + ':' + (data.npcs?.[0]?.id || 'x')) >>> 0) || 12345;
@@ -337,7 +338,7 @@ function renderChar(forcePortrait = false) {
   facts.push(c.known.loves ? `😍 loves ${arch.loves.join(', ')}` : '😍 loves ???');
   facts.push(c.known.dislikes ? `🙅 hates ${arch.dislikes.join(', ')}` : '🙅 hates ???');
   facts.push(c.known.quirk ? `⭐ ${quirkOf(c).text}` : '⭐ ???');
-  facts.push(c.known.type ? `💘 into: ${c.attractedTo.map(g => GENDER_LABELS[g]).join(', ')}` : '💘 type: ???');
+  facts.push(c.known.type ? '💘 pansexual — into people, not genders' : '💘 type: ???');
   facts.push(c.known.rel ? `${REL_LABELS[c.relStyle].chip} — ${REL_LABELS[c.relStyle].desc}` : '💞 relationship style: ???');
   $('#profile').innerHTML = facts.map(f => `<div class="fact">${f}</div>`).join('');
 
@@ -767,8 +768,15 @@ async function npcReply(c, text) {
     // provider generates the words; NLU on the player's text drives the stats
     r = resolveTyped(c, pl, text, rng, roleData());
     try {
-      const recent = (S.logs[c.id] || []).slice(-6).map(e => `${e.who === 'me' ? S.player.name : c.name}: ${e.text}`);
-      const out = await prov(text, chatPersona(c, pl, recent), { tier: tierFor(c) });
+      const recent = (S.logs[c.id] || []).slice(-12)
+        .filter(e => e.who !== 'sys')
+        .map(e => `${e.who === 'me' ? S.player.name : c.name}: ${e.text}`);
+      const world = {
+        location: locationById(S.player.location)?.name,
+        phase: phaseOf(S.player.hour),
+        day: S.player.day,
+      };
+      const out = await prov(text, chatPersona(c, pl, recent, world), { tier: tierFor(c) });
       if (out && typeof out === 'string') r.npcText = out.trim();
     } catch { /* fall back to procedural r.npcText */ }
   } else {
@@ -1243,17 +1251,39 @@ function openTextComposer(npcId) {
   });
 }
 
-function sendText(c, kind) {
+async function sendText(c, kind) {
   S.player.textsSent[c.id] = (S.player.textsSent[c.id] ?? 0) + 1;
-  const r = textExchange(c, playerForDialogue(), kind, rng);
+  const pl = playerForDialogue();
+  const r = textExchange(c, pl, kind, rng);
   switchTo(c.id);
   log('me', `📱 ${r.out}`);
   applyDelta(c, r.dAff, r.dDes);
   if (r.accepted && (kind === 'flirty' || kind === 'spicy')) registerRomance(c, 0.05);
   // a spicy text that lands badly is the kind of screenshot that travels
   if (!r.accepted && kind === 'spicy') adjustRep(-3);
+
+  // texts are generative too: same provider chain, texting register; the
+  // canned exchange keeps deciding accept/stats and remains the fallback
+  let reply = r.reply;
+  const prov = window.BCB_CHAT_PROVIDER;
+  if (typeof prov === 'function') {
+    try {
+      const recent = (S.logs[c.id] || []).slice(-10)
+        .filter(e => e.who !== 'sys')
+        .map(e => `${e.who === 'me' ? S.player.name : c.name}: ${e.text}`);
+      const persona = chatPersona(c, pl, recent, { phase: phaseOf(S.player.hour), day: S.player.day });
+      persona.channel = 'text';
+      persona.steer = r.accepted
+        ? 'This text landed well with you — reply warmly in kind.'
+        : 'This text did NOT land — reply with the brush-off, annoyance, or boundary it deserves.';
+      // pass the same string that was logged so history dedupe matches
+      const out = await prov(`📱 ${r.out}`, persona, { tier: tierFor(c) });
+      if (out && typeof out === 'string') reply = out.trim().replace(/^📱\s*/, '');
+    } catch { /* canned reply stands */ }
+  }
+
   setTimeout(() => {
-    npcSay(`📱 ${r.reply}`);
+    npcSay(`📱 ${reply}`);
     if (kind === 'invite' && r.accepted) {
       advanceTime(1);
       narrate(`📍 ${c.name} shows up twenty minutes later, exactly as promised.`);
@@ -1520,90 +1550,207 @@ async function applyUpdate() {
   location.reload();
 }
 
-// ---------------- AI chat (optional, player supplies an API key) ----------------
-// Wires window.BCB_CHAT_PROVIDER to call the Anthropic API directly from the
-// browser so NPC replies are genuinely generative — ChatGPT-style. The player's
-// key lives only in their own localStorage. Falls back to the offline engine
-// whenever no key is set or a call fails.
+// ---------------- AI chat (generative BY DEFAULT — no key needed) ----------------
+// Wires window.BCB_CHAT_PROVIDER so NPC replies are genuinely generative,
+// ChatGPT-style, out of the box. Three tiers, best-available wins:
+//   1. Anthropic (player's key, best quality)  →  2. free text API (default,
+//   no key, via Pollinations)  →  3. offline procedural engine (only when
+//   everything network fails — the game must never go silent).
+// Whatever generates the words, NLU on the player's text drives the stat math.
 const AI_MODELS = [
   { id: 'claude-haiku-4-5', label: 'Fast (Haiku 4.5)' },
   { id: 'claude-sonnet-5', label: 'Balanced (Sonnet 5) — recommended' },
   { id: 'claude-opus-4-8', label: 'Best (Opus 4.8)' },
 ];
+const CHAT_MODES = [
+  { id: 'free', label: '✨ Generative chat (free, no key) — default' },
+  { id: 'anthropic', label: '🤖 Anthropic key (best quality)' },
+  { id: 'offline', label: '🚫 Offline scripted chat only' },
+];
 
 function aiConfig() {
+  const key = localStorage.getItem('bcb_ai_key') || '';
   return {
-    key: localStorage.getItem('bcb_ai_key') || '',
+    // players who already pasted a key keep their premium tier
+    mode: localStorage.getItem('bcb_chat_mode') || (key ? 'anthropic' : 'free'),
+    key,
     model: localStorage.getItem('bcb_ai_model') || 'claude-sonnet-5',
   };
 }
 
+// One shared in-character system prompt for every backend, tuned for logical,
+// fluid, continuous conversation — not canned one-liners.
+function personaSystemPrompt(persona) {
+  const w = persona.world || {};
+  return [
+    `You are ${persona.name}, ${persona.age}, a real person in the beach town of Beach City. Pronouns: ${persona.pronouns}.`,
+    `Personality: ${persona.personality}. Job: ${persona.job}. From ${persona.hometown}. Quirk: ${persona.quirk}.`,
+    persona.likes?.length ? `You love ${persona.likes.join(', ')}; you can't stand ${persona.dislikes?.join(', ') || 'rudeness'}.` : '',
+    `You're talking with ${persona.playerName}. Relationship: ${persona.relationship}${persona.agreement && persona.agreement !== 'none' ? ' (' + persona.agreement + ')' : ''}. Your current mood: ${persona.mood}.`,
+    w.location ? `Right now it's ${w.phase || 'daytime'} on day ${w.day || 1} of summer and you're both at ${w.location}.` : '',
+    persona.interested
+      ? 'You ARE romantically/sexually interested in them — attraction that grows with real chemistry.'
+      : 'You are NOT romantically interested — keep it warmly friendly and deflect flirting kindly.',
+    persona.desireHint ? `Something you currently want (drop hints, don't demand): "${persona.desireHint}"` : '',
+    persona.turnoffs?.length ? `Instant turn-offs for you: ${persona.turnoffs.join(', ')}.` : '',
+    persona.boldness >= 0.7 ? 'You are bold — you tease first and escalate when it feels right.'
+      : persona.boldness <= 0.35 ? 'You warm up slowly — you make people earn your spark.' : '',
+    'CONVERSATION RULES — this is what makes you feel real:',
+    '- React to what they ACTUALLY said. Answer direct questions directly.',
+    '- Remember and reference earlier lines from this conversation.',
+    '- Never repeat a line you already said; vary your rhythm and length.',
+    '- Sometimes ask a question back or steer to something you care about.',
+    '- You are NOT a pushover: push back on creepy, boring, rude, or too-fast moves; attraction builds over time.',
+    'TONE CEILING: suggestive and playful — innuendo and teasing are great, but never sexually explicit. Fade to black at the bedroom door.',
+    persona.steer || '',
+    persona.channel === 'text'
+      ? 'You are replying to a TEXT MESSAGE on your phone: 1-2 short casual sentences, texting register, emoji welcome.'
+      : 'Reply with ONLY your spoken response, 1-3 sentences, no narration, no quotation marks, no name prefix.',
+  ].filter(Boolean).join('\n');
+}
+
+function personaMessages(persona, playerText) {
+  const messages = [];
+  for (const line of (persona.recent || [])) {
+    const isMe = line.startsWith(persona.playerName + ':') || /^me:|^you:/i.test(line);
+    const content = line.replace(/^[^:]+:\s*/, '');
+    // the just-typed line is already in the log — don't send it twice
+    if (isMe && content === playerText && line === persona.recent[persona.recent.length - 1]) continue;
+    messages.push({ role: isMe ? 'user' : 'assistant', content });
+  }
+  messages.push({ role: 'user', content: playerText });
+  if (messages[0].role !== 'user') messages.unshift({ role: 'user', content: 'hi' });
+  // strict user/assistant alternation (the Anthropic API requires it)
+  const merged = [];
+  for (const m of messages) {
+    if (merged.length && merged[merged.length - 1].role === m.role) {
+      merged[merged.length - 1].content += '\n' + m.content;
+    } else merged.push({ ...m });
+  }
+  return merged;
+}
+
+// A hung request must never freeze the chat bar.
+function timeoutSignal(ms) {
+  const ctl = new AbortController();
+  setTimeout(() => ctl.abort(), ms);
+  return ctl.signal;
+}
+
+// Normalize model output into a clean spoken line.
+function tidyReply(text, name) {
+  if (!text) return null;
+  const safe = String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let t = String(text).trim()
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .replace(new RegExp(`^${safe}\\s*:\\s*`, 'i'), '')
+    .replace(/^\*[^*]*\*\s*/, ''); // leading stage direction
+  if (t.length > 420) { // wayward models ramble; cut at a sentence boundary
+    const cut = t.slice(0, 420);
+    t = cut.slice(0, Math.max(cut.lastIndexOf('.'), cut.lastIndexOf('!'), cut.lastIndexOf('?')) + 1) || cut;
+  }
+  return t || null;
+}
+
+async function anthropicChat(playerText, persona) {
+  const { key, model } = aiConfig();
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model, max_tokens: 220,
+      system: personaSystemPrompt(persona),
+      messages: personaMessages(persona, playerText),
+    }),
+    signal: timeoutSignal(20000),
+  });
+  if (!res.ok) { if (res.status === 401) toast('AI key rejected — check it in the menu.'); return null; }
+  const data = await res.json();
+  return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ').trim() || null;
+}
+
+// Free tier: Pollinations' OpenAI-compatible text endpoint. No key, CORS-open,
+// returns the completion as plain text.
+async function freeChat(playerText, persona) {
+  const res = await fetch('https://text.pollinations.ai/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'openai',
+      messages: [
+        { role: 'system', content: personaSystemPrompt(persona) },
+        ...personaMessages(persona, playerText),
+      ],
+    }),
+    signal: timeoutSignal(15000),
+  });
+  if (!res.ok) return null;
+  const text = (await res.text()).trim();
+  // guard: some gateway errors come back 200 with a JSON error body
+  if (!text || text.startsWith('{"error"')) return null;
+  return text;
+}
+
 function installChatProvider() {
-  const { key } = aiConfig();
-  if (!key) { window.BCB_CHAT_PROVIDER = null; return; }
-  window.BCB_CHAT_PROVIDER = async (playerText, persona, ctx) => {
-    const { key, model } = aiConfig();
-    if (!key) return null;
-    const sys = [
-      `You are ${persona.name}, ${persona.age}, a character in a flirty beach-town dating sim. Pronouns: ${persona.pronouns}.`,
-      `Personality: ${persona.personality}. Current mood: ${persona.mood}. Relationship with the player: ${persona.relationship}${persona.agreement && persona.agreement !== 'none' ? ' (' + persona.agreement + ')' : ''}.`,
-      persona.interested ? 'You ARE romantically/sexually interested in the player.' : 'You are NOT romantically interested in the player — keep it friendly, deflect flirting warmly.',
-      persona.turnoffs?.length ? `Turn-offs: ${persona.turnoffs.join(', ')}.` : '',
-      'Stay fully in character. Reply as this person would — witty, warm, flirty when it fits. You have real boundaries and self-respect: you are NOT a pushover. Push back on anything creepy, boring, rude, or too-fast, and let attraction build over time.',
-      'TONE CEILING: keep it suggestive and playful — innuendo and teasing are great, but never write sexually explicit content. Fade to black at the bedroom door.',
-      'Reply with ONLY your spoken response, 1–3 sentences, no narration, no quotation marks, no name prefix.',
-    ].filter(Boolean).join('\n');
-    const messages = [];
-    for (const line of (persona.recent || [])) {
-      const isMe = line.startsWith(persona.playerName + ':') || /^me:|^you:/i.test(line);
-      messages.push({ role: isMe ? 'user' : 'assistant', content: line.replace(/^[^:]+:\s*/, '') });
+  const { mode } = aiConfig();
+  if (mode === 'offline') { window.BCB_CHAT_PROVIDER = null; return; }
+  window.BCB_CHAT_PROVIDER = async (playerText, persona) => {
+    const { mode, key } = aiConfig();
+    // best-available chain: anthropic (if keyed) → free → null (offline engine)
+    if (mode === 'anthropic' && key) {
+      try {
+        const out = tidyReply(await anthropicChat(playerText, persona), persona.name);
+        if (out) return out;
+      } catch { /* fall through to free */ }
     }
-    messages.push({ role: 'user', content: playerText });
-    if (!messages.length || messages[0].role !== 'user') messages.unshift({ role: 'user', content: 'hi' });
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({ model, max_tokens: 200, system: sys, messages }),
-      });
-      if (!res.ok) { if (res.status === 401) toast('AI key rejected — check it in the menu.'); return null; }
-      const data = await res.json();
-      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
-      return text || null;
+      return tidyReply(await freeChat(playerText, persona), persona.name);
     } catch { return null; }
   };
 }
 
 function openAISettings() {
-  const { key, model } = aiConfig();
+  const { mode, key, model } = aiConfig();
   openModal(`
-    <h3>🤖 AI Chat (beta)</h3>
-    <p class="modal-text">Make the babes talk with a real language model — genuinely generative, in-character replies. Paste your <b>Anthropic API key</b> below. It's stored only on this device and sent straight to Anthropic. Leave blank to use the built-in offline chat.</p>
+    <h3>🤖 AI Chat</h3>
+    <p class="modal-text">The babes talk through a real language model <b>by default</b> —
+    genuinely generative, in-character conversation, no key needed. Paste an
+    <b>Anthropic API key</b> for the best quality, or go fully offline.</p>
     <div class="stack">
-      <input id="ai-key" type="password" placeholder="sk-ant-..." value="${key ? '••••••••' : ''}" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px">
-      <label class="modal-text" style="margin:0">Model</label>
-      <select id="ai-model" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px;background:#fff">
-        ${AI_MODELS.map(m => `<option value="${m.id}" ${m.id === model ? 'selected' : ''}>${m.label}</option>`).join('')}
+      <label class="modal-text" style="margin:0">Chat source</label>
+      <select id="chat-mode" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px;background:#fff">
+        ${CHAT_MODES.map(m => `<option value="${m.id}" ${m.id === mode ? 'selected' : ''}>${m.label}</option>`).join('')}
       </select>
+      <div id="chat-anthropic" class="stack" style="display:${mode === 'anthropic' ? 'flex' : 'none'};gap:8px">
+        <input id="ai-key" type="password" placeholder="sk-ant-..." value="${key ? '••••••••' : ''}" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px">
+        <select id="ai-model" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px;background:#fff">
+          ${AI_MODELS.map(m => `<option value="${m.id}" ${m.id === model ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+        ${key ? '<button class="btn danger" id="ai-clear">Remove key</button>' : ''}
+      </div>
       <button class="btn primary" id="ai-save">Save</button>
-      ${key ? '<button class="btn danger" id="ai-clear">Remove key (use offline chat)</button>' : ''}
-      <p class="modal-text" style="font-size:11.5px">Your key stays in this browser's storage. Costs are billed to your Anthropic account. Get a key at console.anthropic.com. Replies stay suggestive, never explicit.</p>
+      <p class="modal-text" style="font-size:11.5px">Free chat is served by pollinations.ai; an Anthropic key stays in this browser's storage and bills to your account (console.anthropic.com). Only the conversation itself is sent. If the network is down the offline engine takes over so the game never goes silent. Replies stay suggestive, never explicit.</p>
     </div>`);
+  $('#chat-mode').onchange = () => {
+    $('#chat-anthropic').style.display = $('#chat-mode').value === 'anthropic' ? 'flex' : 'none';
+  };
   $('#ai-save').onclick = () => {
-    const v = $('#ai-key').value.trim();
+    localStorage.setItem('bcb_chat_mode', $('#chat-mode').value);
+    const v = $('#ai-key')?.value.trim();
     if (v && v !== '••••••••') localStorage.setItem('bcb_ai_key', v);
-    localStorage.setItem('bcb_ai_model', $('#ai-model').value);
+    if ($('#ai-model')) localStorage.setItem('bcb_ai_model', $('#ai-model').value);
     installChatProvider();
     closeModal();
-    toast(aiConfig().key ? '🤖 AI chat on — the babes are alive.' : 'Using offline chat.');
+    const m = aiConfig().mode;
+    toast(m === 'offline' ? 'Offline scripted chat.' : m === 'anthropic' && aiConfig().key ? '🤖 Anthropic chat on — the babes are alive.' : '✨ Generative chat on.');
   };
   const clear = $('#ai-clear');
-  if (clear) clear.onclick = () => { localStorage.removeItem('bcb_ai_key'); installChatProvider(); closeModal(); toast('AI key removed — offline chat.'); };
+  if (clear) clear.onclick = () => { localStorage.removeItem('bcb_ai_key'); installChatProvider(); closeModal(); toast('Key removed — using free generative chat.'); };
 }
 
 // ---------------- AI Art (generative character portraits) ----------------
@@ -1736,7 +1883,7 @@ function bindUI() {
   $('#cc-back').onclick = () => { show('#title-screen'); renderTitle(); };
   $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
   $('#btn-menu').onclick = () => {
-    const aiOn = !!aiConfig().key;
+    const aiOn = aiConfig().mode !== 'offline';
     const artMode = artConfig().mode;
     const artOn = artMode !== 'off';
     openModal(`

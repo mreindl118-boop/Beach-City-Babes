@@ -125,18 +125,29 @@ WebView; the auto-update toast still functions since the game polls
 | `tools/make_icons.py` | Regenerates the 🍑 icon PNGs (Pillow) |
 | `tools/bump_version.py` | One-command release bump |
 
-## AI chat (optional — real generative NPCs)
+## AI chat — generative conversation by default
 
-By default the babes talk through the offline procedural engine (intent
-understanding + contextual replies, no key needed). For **ChatGPT-quality,
-truly generative** conversation, open **☰ Menu → 🤖 AI Chat**, paste an
-Anthropic API key, and pick a model (Haiku = fast, Sonnet = balanced,
-Opus = best). The game then calls the Anthropic API directly from your
-browser and each character replies in-character, with real personality and
-boundaries — while your typed message still drives the affection/desire math.
-The key is stored only in your browser's localStorage and sent straight to
-Anthropic; costs bill to your account. Replies stay suggestive, never explicit.
-Advanced users can instead wire `window.BCB_CHAT_PROVIDER` themselves.
+The babes talk through a **real language model out of the box** — genuinely
+generative, ChatGPT-style, in-character conversation with no key and no setup
+(free tier served by [Pollinations](https://pollinations.ai)). Every NPC gets a
+full persona prompt — personality, job, quirks, mood, relationship, current
+desires, where you are and what time it is — plus the running conversation, so
+replies are logical, fluid, and remember what was said. Phone texts are
+generative too. Your typed message still drives the affection/desire math
+either way.
+
+Open **☰ Menu → 🤖 AI Chat** to switch tiers:
+
+- **✨ Generative chat (default, no key)** — free LLM via Pollinations.
+- **🤖 Anthropic key (best quality)** — paste a key from console.anthropic.com
+  and pick a model (Haiku = fast, Sonnet = balanced, Opus = best); calls go
+  straight from your browser, the key stays in localStorage, costs bill to you.
+- **🚫 Offline scripted chat** — the built-in procedural engine (also the
+  automatic fallback whenever the network is down, so the game never goes
+  silent).
+
+Replies stay suggestive, never explicit. Advanced users can instead wire
+`window.BCB_CHAT_PROVIDER` themselves.
 
 ## AI art — generative character portraits
 

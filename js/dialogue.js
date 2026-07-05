@@ -230,9 +230,9 @@ const FACT_REVEALS = [
 
 function factCtx(c) {
   const arch = archetypeOf(c);
-  const wants = c.attractedTo
-    .map(g => ({ man: 'men', woman: 'women', enby: 'enby folks' }[g] || g))
-    .join(', ');
+  const wants = c.attractedTo.length >= 3
+    ? 'pretty much everyone — cute is cute, I don’t do checkboxes'
+    : c.attractedTo.map(g => ({ man: 'men', woman: 'women', enby: 'enby folks' }[g] || g)).join(', ');
   return {
     loves: arch.loves.join(' and '),
     dislikes: arch.dislikes.join(' and '),
@@ -1100,21 +1100,28 @@ export function classifyChoice(text, choices) {
 }
 
 // Persona/context bundle handed to an LLM provider so it stays in character.
-export function chatPersona(c, player, recentLog) {
+export function chatPersona(c, player, recentLog, world = {}) {
   const arch = archetypeOf(c);
   const p = pronounsOf(c);
+  const desire = currentDesireOf(c);
   return {
     name: c.name, age: c.age, pronouns: p.label,
     playerName: player.name,
     personality: `${arch.label}: ${arch.desc}`,
-    job: c.known.job ? c.job : 'undisclosed',
+    // the character knows their own life — discovery gates only the player's UI
+    job: c.job, hometown: c.hometown,
+    quirk: quirkOf(c).text,
+    likes: arch.loves, dislikes: arch.dislikes,
     relationship: tierLabelSafe(c),
+    relStyle: c.relStyle, partner: !!c.partner,
     agreement: c.agreement,
     mood: ['hostile', 'annoyed', 'neutral', 'warm', 'smitten'][c.mood + 2],
     interested: isInterested(c, player),
-    likes: c.known.loves ? arch.loves : undefined,
+    desireHint: desire?.hint || null,
     turnoffs: c.turnoffs,
     boldness: c.boldness, libido: c.libido,
+    affection: c.affection, desire: c.desire,
+    world, // { location, phase, day } — where this conversation is happening
     recent: recentLog,
     style: 'Reply in first person as this character. Flirty, witty, with real boundaries — you are NOT a pushover and reject moves that are creepy, boring, or too fast. Keep it suggestive, never sexually explicit. 1-3 sentences.',
   };

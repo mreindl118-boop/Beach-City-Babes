@@ -18,11 +18,10 @@ export const HAIR_STYLES = {
 export const ACCESSORIES = ['none', 'flower', 'shades', 'hoops', 'choker', 'cap', 'stud'];
 
 // Orientation: weighted so most genders have a decent dating pool.
-function rollAttraction(rng) {
-  return rng.weighted([
-    [['man'], 3], [['woman'], 3], [['man', 'woman'], 2],
-    [['man', 'woman', 'enby'], 3], [['woman', 'enby'], 1], [['man', 'enby'], 1],
-  ]);
+// Everyone in Beach City is pansexual: attraction is about the person, never
+// the gender. Chemistry, standards, and mood still decide who actually clicks.
+function rollAttraction() {
+  return ['man', 'woman', 'enby'];
 }
 
 export function generateCharacter(rng, usedNames = new Set()) {
@@ -53,7 +52,7 @@ export function generateCharacter(rng, usedNames = new Set()) {
     transShared: false, // set true once they open up to the player
     pronouns,
     presentation,
-    attractedTo: rollAttraction(rng),
+    attractedTo: rollAttraction(),
     // relationship structure: how this heart is wired
     relStyle: rng.weighted([['mono', 6], ['poly', 4]]),
     agreement: 'none',      // none | exclusive | open — what you two agreed
