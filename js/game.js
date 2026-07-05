@@ -16,6 +16,7 @@ import {
 import {
   portraitSVG, setEmotion, emotionFor, heartBurst, heatLevel,
   finaleSVG, spawnFireworks, describeCharacter, shade,
+  portraitSeed, NEGATIVE_PROMPT,
 } from './art.js';
 import {
   PHASES, phaseOf, phaseInfo, isNightPhase, LOCATIONS, locationById,
@@ -356,10 +357,13 @@ function renderPortrait(c, tier, heat) {
     $('#portrait-box').innerHTML = `<img class="portrait-ext" alt="Portrait of ${c.name}" src="${ext}">`;
     return;
   }
-  $('#portrait-box').innerHTML = portraitSVG(c, `u${uidCounter++}`, tier);
+  const box = $('#portrait-box');
+  box.innerHTML = portraitSVG(c, `u${uidCounter++}`, tier);
+  box.classList.remove('art-gen');
   const prov = window.BCB_PORTRAIT_PROVIDER;
   if (typeof prov === 'function' && !pendingPortraits.has(key)) {
     pendingPortraits.add(key);
+    box.classList.add('art-gen'); // shimmer badge while the model draws
     Promise.resolve(prov(describeCharacter(c, tier), c, heat))
       .then(url => {
         if (url) {
@@ -368,7 +372,10 @@ function renderPortrait(c, tier, heat) {
         }
       })
       .catch(() => {})
-      .finally(() => pendingPortraits.delete(key));
+      .finally(() => {
+        pendingPortraits.delete(key);
+        if (S?.activeId === c.id) box.classList.remove('art-gen');
+      });
   }
 }
 
@@ -1599,6 +1606,124 @@ function openAISettings() {
   if (clear) clear.onclick = () => { localStorage.removeItem('bcb_ai_key'); installChatProvider(); closeModal(); toast('AI key removed — offline chat.'); };
 }
 
+// ---------------- AI Art (generative character portraits) ----------------
+// Wires window.BCB_PORTRAIT_PROVIDER so every NPC is drawn by a real image
+// model. The default provider (Pollinations, Flux) needs no key and no setup —
+// characters just come out as generated anime art. Bring-your-own OpenAI or a
+// local Stable Diffusion WebUI for higher quality. The polished sticker SVG
+// shows instantly as a placeholder and stays the offline fallback. Tone ceiling
+// (suggestive swimwear, never explicit) is baked into describeCharacter().
+const ART_MODES = [
+  { id: 'pollinations', label: '✨ Generative AI art (free, no key) — default' },
+  { id: 'openai', label: '🖼️ OpenAI images (your key, gpt-image-1)' },
+  { id: 'sdwebui', label: '🎨 Local Stable Diffusion WebUI (your endpoint)' },
+  { id: 'off', label: '🚫 Off — drawn sticker art only' },
+];
+
+function artConfig() {
+  return {
+    mode: localStorage.getItem('bcb_art_mode') || 'pollinations',
+    key: localStorage.getItem('bcb_art_key') || '',
+    endpoint: localStorage.getItem('bcb_art_endpoint') || 'http://127.0.0.1:7860',
+  };
+}
+
+const preloadImage = url => new Promise((res, rej) => {
+  const im = new Image();
+  im.onload = () => res(url);
+  im.onerror = () => rej(new Error('img'));
+  im.src = url;
+});
+
+function installArtProvider() {
+  const { mode } = artConfig();
+  window.BCB_PORTRAIT_CACHE = {}; // provider changed — drop cached images
+  if (mode === 'off') { window.BCB_PORTRAIT_PROVIDER = null; return; }
+
+  window.BCB_PORTRAIT_PROVIDER = async (prompt, c, heat) => {
+    const { mode, key, endpoint } = artConfig();
+    const seed = portraitSeed(c, heat);
+    try {
+      if (mode === 'pollinations') {
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`
+          + `?width=512&height=768&nologo=true&model=flux&seed=${seed}&enhance=true`;
+        return await preloadImage(url); // resolves only once the image is decoded
+      }
+      if (mode === 'openai') {
+        if (!key) return null;
+        const res = await fetch('https://api.openai.com/v1/images/generations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model: 'gpt-image-1', prompt, size: '1024x1536', n: 1 }),
+        });
+        if (!res.ok) { if (res.status === 401) toast('Art key rejected — check it in the menu.'); return null; }
+        const data = await res.json();
+        const b64 = data?.data?.[0]?.b64_json;
+        return b64 ? `data:image/png;base64,${b64}` : null;
+      }
+      if (mode === 'sdwebui') {
+        const base = endpoint.replace(/\/+$/, '');
+        const res = await fetch(`${base}/sdapi/v1/txt2img`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            prompt, negative_prompt: NEGATIVE_PROMPT,
+            width: 512, height: 768, steps: 24, cfg_scale: 7, seed,
+            sampler_name: 'DPM++ 2M Karras',
+          }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const b64 = data?.images?.[0];
+        return b64 ? `data:image/png;base64,${b64}` : null;
+      }
+    } catch { return null; }
+    return null;
+  };
+}
+
+function openArtSettings() {
+  const { mode, key, endpoint } = artConfig();
+  openModal(`
+    <h3>🖼️ AI Art</h3>
+    <p class="modal-text">Draw every character with a real image model. The default
+    (<b>Generative AI art</b>) needs no key — the babes render as generated anime pin-ups
+    straight away. Bring an OpenAI key or a local Stable Diffusion endpoint for more control.
+    The drawn sticker art always shows first and stays the offline fallback.</p>
+    <div class="stack">
+      <label class="modal-text" style="margin:0">Art source</label>
+      <select id="art-mode" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px;background:#fff">
+        ${ART_MODES.map(m => `<option value="${m.id}" ${m.id === mode ? 'selected' : ''}>${m.label}</option>`).join('')}
+      </select>
+      <div id="art-openai" class="stack" style="display:${mode === 'openai' ? 'flex' : 'none'};gap:8px">
+        <input id="art-key" type="password" placeholder="OpenAI key sk-..." value="${key ? '••••••••' : ''}" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px">
+      </div>
+      <div id="art-sd" class="stack" style="display:${mode === 'sdwebui' ? 'flex' : 'none'};gap:8px">
+        <input id="art-endpoint" type="text" placeholder="http://127.0.0.1:7860" value="${endpoint}" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px">
+        <p class="modal-text" style="font-size:11.5px;margin:0">Run AUTOMATIC1111 with <code>--api --cors-allow-origins=*</code>.</p>
+      </div>
+      <button class="btn primary" id="art-save">Save</button>
+      <p class="modal-text" style="font-size:11.5px">Prompts (a character's looks) are sent to the chosen service to draw the art; no personal data leaves your device. Generated art stays suggestive-swimwear, never explicit. Free provider by pollinations.ai.</p>
+    </div>`);
+  $('#art-mode').onchange = () => {
+    const v = $('#art-mode').value;
+    $('#art-openai').style.display = v === 'openai' ? 'flex' : 'none';
+    $('#art-sd').style.display = v === 'sdwebui' ? 'flex' : 'none';
+  };
+  $('#art-save').onclick = () => {
+    const m = $('#art-mode').value;
+    localStorage.setItem('bcb_art_mode', m);
+    const kv = $('#art-key')?.value.trim();
+    if (kv && kv !== '••••••••') localStorage.setItem('bcb_art_key', kv);
+    const ep = $('#art-endpoint')?.value.trim();
+    if (ep) localStorage.setItem('bcb_art_endpoint', ep);
+    installArtProvider();
+    closeModal();
+    toast(m === 'off' ? 'Drawn sticker art.' : '🖼️ Generative art on — redrawing…');
+    if (S && S.activeId) { lastHeat = -1; renderChar(true); }
+  };
+}
+
 // ---------------- boot ----------------
 function bindUI() {
   $('#age-yes').onclick = () => {
@@ -1612,15 +1737,19 @@ function bindUI() {
   $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
   $('#btn-menu').onclick = () => {
     const aiOn = !!aiConfig().key;
+    const artMode = artConfig().mode;
+    const artOn = artMode !== 'off';
     openModal(`
       <h3>⚙️ Menu</h3>
       <div class="stack">
+        <button class="btn primary" id="m-art">🖼️ AI Art ${artOn ? '(on)' : '(off)'}</button>
         <button class="btn primary" id="m-ai">🤖 AI Chat ${aiOn ? '(on)' : '(off)'}</button>
         <button class="btn" id="m-update">🔄 Check for updates</button>
         <button class="btn" id="m-title">💾 Save & quit to title</button>
         <p class="modal-text">Beach City Babes v${VERSION} (build ${BUILD})<br>
         Autosaves constantly. Checks for updates on startup. 🍑</p>
       </div>`);
+    $('#m-art').onclick = openArtSettings;
     $('#m-ai').onclick = openAISettings;
     $('#m-update').onclick = async () => { updatePromptShown = false; closeModal(); toast('Checking…'); await checkForUpdate(true); if (!updatePromptShown) toast('You’re on the latest version. ✓'); };
     $('#m-title').onclick = () => { save(); closeModal(); show('#title-screen'); renderTitle(); };
@@ -1654,6 +1783,7 @@ function boot() {
   }
   show('#title-screen');
   installChatProvider();
+  installArtProvider();
   registerSW();
   checkForUpdate(true); // prompt to apply on fresh startup
   setInterval(() => checkForUpdate(false), 10 * 60 * 1000);

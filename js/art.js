@@ -396,23 +396,92 @@ export function emotionFor(c, tier = 0) {
   return 'neutral';
 }
 
-// A prompt for any generative-image provider the player wires up themselves
-// (window.BCB_PORTRAIT_PROVIDER). Encodes the Sticker-Pop style guide + this
-// character's genes. Keep outputs suggestive-swimwear, never explicit.
+// ---------- generative-image prompting ----------
+// Plain-English colour/style names so the prompt reads well to any image model
+// (Flux/SD via Pollinations, gpt-image, a local SD WebUI, …). Indices line up
+// with the palettes exported from characters.js.
+const HAIR_NAMES = ['black', 'dark brown', 'chestnut brown', 'auburn', 'honey blonde',
+  'golden blonde', 'wine red', 'purple', 'teal blue', 'pink'];
+const EYE_NAMES = ['warm brown', 'forest green', 'ocean blue', 'violet', 'hazel', 'cool grey'];
+const HAIRSTYLE_WORDS = {
+  waves: 'long wavy hair', ponytail: 'high ponytail', bob: 'chin-length bob',
+  curls: 'long curly hair', bun: 'messy hair bun', short: 'short tousled hair',
+  swoop: 'short hair with a swept fringe', buzz: 'buzz cut', curlsShort: 'short curly hair',
+  manbun: 'top-knot man-bun',
+};
+const EXPR_WORDS = {
+  neutral: 'calm confident expression', smug: 'smug little smile', teasing: 'playful teasing smirk',
+  happy: 'bright warm smile', laugh: 'laughing, eyes closed', shy: 'shy blush, glancing away',
+  love: 'loving gaze with sparkling eyes', sultry: 'seductive half-lidded bedroom eyes, faint blush',
+  annoyed: 'unimpressed arched-brow frown', sad: 'soft downcast expression', kiss: 'coy pursed-lip look',
+};
+
+// Danbooru-flavoured body tags from the continuous measurement genes, so bustier
+// / curvier characters actually read differently in the generated art.
+function bodyTags(c) {
+  const m = c.measurements || { bust: 1, waist: 0.85, hips: 1.1, sh: 1 };
+  const t = [];
+  if (c.presentation === 'fem') {
+    t.push(m.bust >= 1.25 ? 'large breasts' : m.bust >= 0.85 ? 'medium breasts' : 'small breasts');
+  } else {
+    t.push(c.body === 'muscular' ? 'muscular pecs, defined abs'
+      : c.body === 'athletic' ? 'lean toned chest' : 'natural build');
+  }
+  t.push(m.hips >= 1.2 ? 'wide hips, thick thighs' : m.hips >= 0.9 ? 'curvy hips' : 'slim hips');
+  t.push(m.waist <= 0.8 ? 'slim waist' : 'soft waist');
+  const bodyWord = { slim: 'slender figure', curvy: 'hourglass curvy figure',
+    athletic: 'athletic figure', soft: 'soft plush figure', muscular: 'muscular figure' };
+  t.push(bodyWord[c.body] || `${BODY_LABELS[c.body]} figure`);
+  return t.join(', ');
+}
+
+// A deterministic seed so a given character keeps the same generated face across
+// re-renders, but shifts as heat rises (new outfit/scene per tier).
+export function portraitSeed(c, heat = 0) {
+  let h = 2166136261;
+  const s = String(c.id ?? c.name ?? 'bcb');
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return ((h >>> 0) % 100000) + heat * 1000;
+}
+
+// Quality/safety guardrails handed to providers that accept a negative prompt.
+export const NEGATIVE_PROMPT =
+  'nsfw, nude, nudity, explicit, genitalia, nipples, lowres, bad anatomy, bad hands, ' +
+  'extra limbs, extra fingers, fused fingers, deformed, disfigured, watermark, signature, ' +
+  'text, jpeg artifacts, ugly, blurry, child, underage, loli, shota';
+
+// The prompt handed to window.BCB_PORTRAIT_PROVIDER (the built-in AI-Art
+// providers, or one the player wires up themselves). Encodes an anime pin-up
+// style plus every one of this character's genes. Suggestive swimwear only —
+// the tone ceiling applies to the art exactly as it does to the writing.
 export function describeCharacter(c, tier = 0) {
   const heat = heatLevel(c, tier);
   const accentName = ACCENT_NAMES[c.look.accent ?? 0];
+  const hairBase = HAIR_NAMES[c.look.hairColor] ?? 'dark';
+  const eyeName = EYE_NAMES[c.look.eyes] ?? accentName;
+  const hairStyle = HAIRSTYLE_WORDS[c.look.hairStyle] || 'stylish hair';
+  const expr = EXPR_WORDS[emotionFor(c, tier)] || EXPR_WORDS.neutral;
+  const gender = GENDER_LABELS[c.gender].toLowerCase();
   const outfit = c.presentation === 'fem'
-    ? ['sporty one-piece swimsuit', 'classic bikini', 'daring string bikini'][heat]
-    : ['rash guard and boardshorts', 'open shirt and swim trunks', 'bare chest, shell necklace, low swim trunks'][heat];
-  const scene = ['sunny beach day', 'golden sunset beach', 'moonlit beach at night'][heat];
+    ? ['a sporty one-piece swimsuit', 'a cute two-piece bikini', 'a daring string bikini and sheer sarong'][heat]
+    : ['a fitted rash guard and boardshorts', 'an open beach shirt and swim trunks', 'bare toned chest, shell necklace and low swim trunks'][heat]
+    ;
+  const accessory = { flower: 'a hibiscus flower in the hair', shades: 'stylish sunglasses',
+    hoops: 'gold hoop earrings', choker: 'a black choker', cap: 'a snapback cap',
+    stud: 'a small ear stud' }[c.look.accessory];
+  const scene = ['a bright sunny beach with turquoise water',
+    'a golden-hour sunset beach, warm rim light',
+    'a moonlit beach at night, soft neon glow'][heat];
   return [
-    'sticker-pop cartoon pin-up, modern western-anime hybrid, adult (21+),',
-    `${GENDER_LABELS[c.gender].toLowerCase()}, ${BODY_LABELS[c.body]} body, oversized rounded hips and thighs as dominant silhouette, small torso, long smooth limbs, tiny tapered hands with ${accentName} painted nails,`,
-    `two-tone ${c.look.hairStyle} hair with dark roots melting into vivid ${accentName}, large glossy ${accentName} iris, heavy-lidded confident expression,`,
-    `wearing ${outfit}, ${scene} background (flat, muted, darker than character),`,
-    'thick smooth dark-brown outlines, continuous white die-cut sticker stroke around silhouette, flat cel shading with one hard shadow tone and white specular shines, soft airbrush blush, floating white-outlined hearts, four-point sparkles,',
-    'flat 2D vector look, no gradients except hair melt and blush, no realistic detail, suggestive but safe-for-work swimwear pin-up',
+    'masterpiece, best quality, highly detailed anime illustration, ecchi pin-up art style,',
+    'clean cel shading, vibrant saturated colors, soft rim lighting, cinematic,',
+    `a beautiful adult ${gender}, early-to-mid 20s,`,
+    `${bodyTags(c)},`,
+    `${hairStyle}, two-tone ${hairBase} hair with vivid ${accentName} tips, large expressive ${eyeName} eyes,`,
+    `${expr},`,
+    accessory ? `wearing ${outfit}, ${accessory},` : `wearing ${outfit},`,
+    `full-body pin-up pose, ${scene} in the background,`,
+    'dynamic flattering composition, glossy skin highlights, suggestive but tasteful, swimwear only, safe-for-work',
   ].join(' ');
 }
 

@@ -138,16 +138,29 @@ The key is stored only in your browser's localStorage and sent straight to
 Anthropic; costs bill to your account. Replies stay suggestive, never explicit.
 Advanced users can instead wire `window.BCB_CHAT_PROVIDER` themselves.
 
-## Generated portraits (optional, bring your own backend)
+## AI art — generative character portraits
 
-The SVG portraits are the default, but the pipeline accepts generated images:
-set `window.BCB_PORTRAIT_PROVIDER = async (prompt, character, heat) => dataURL`
-before the game boots (e.g. a local Stable Diffusion WebUI endpoint) and each
-character's portrait is replaced per heat tier, cached in memory for the
-session. The `prompt` argument comes from `describeCharacter()` in
-`js/art.js`, which encodes the Sticker-Pop style guide plus that character's
-genes. Keep your provider's outputs swimwear-suggestive — the game's tone
-ceiling applies to art too.
+Every NPC can be drawn by a real image model. Open **☰ Menu → 🖼️ AI Art** and
+pick a source:
+
+- **✨ Generative AI art (default, no key)** — characters render as generated
+  anime pin-ups out of the box via [Pollinations](https://pollinations.ai)
+  (Flux). Nothing to set up.
+- **🖼️ OpenAI images** — paste an OpenAI key to draw with `gpt-image-1`.
+- **🎨 Local Stable Diffusion WebUI** — point it at your own AUTOMATIC1111
+  endpoint (run it with `--api --cors-allow-origins=*`).
+- **🚫 Off** — the hand-drawn Sticker-Pop SVG only.
+
+The drawn sticker portrait always shows *instantly* as a placeholder and stays
+the offline fallback; the generated image fades in over it and is cached per
+character and heat tier. Prompts are built by `describeCharacter()` in
+`js/art.js` from every one of that character's genes — body measurements,
+two-tone hair, eye color, live expression, and a heat-tiered outfit/scene — with
+a baked-in negative prompt. Only the art description leaves your device, and the
+tone ceiling applies to art exactly as it does to the writing: suggestive
+swimwear, never explicit. Advanced users can still wire
+`window.BCB_PORTRAIT_PROVIDER = async (prompt, character, heat) => dataURL`
+themselves for any other backend.
 
 ## Content rating
 

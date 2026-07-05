@@ -288,8 +288,26 @@ h1 span { color: var(--gold); }
 @media (max-width: 600px) { .stats-strip { display: none; } }
 
 /* ---------- sticker-pop additions ---------- */
-.portrait-ext { width: 100%; display: block; border-radius: 18px; }
+.portrait-ext {
+  width: 100%; display: block; border-radius: 18px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+  animation: art-fade 0.5s ease;
+}
+@keyframes art-fade { from { opacity: 0; transform: scale(1.02); } to { opacity: 1; transform: none; } }
 #portrait-box svg.sticker { filter: drop-shadow(0 4px 10px rgba(0,0,0,0.18)); }
+
+/* generative-art loading badge (shown over the placeholder sticker) */
+#portrait-box { position: relative; }
+#portrait-box.art-gen::after {
+  content: '✨ drawing…';
+  position: absolute; left: 8px; bottom: 8px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  color: #fff; background: rgba(24,16,32,0.62); backdrop-filter: blur(3px);
+  animation: art-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes art-pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
 
 /* ---------- typed chat bar ---------- */
 #chat-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 0; }
