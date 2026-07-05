@@ -47,6 +47,16 @@ jobs:
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
                 android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
+      - name: Use the committed stable debug keystore
+        # Gradle's assembleDebug signs with ~/.android/debug.keystore. By default
+        # CI generates a throwaway one per run, so every release got a DIFFERENT
+        # signature and Android refused to update-install over the last one
+        # ("App not installed"). Dropping our committed keystore here gives every
+        # build — forever — the same signature, so updates install cleanly.
+        run: |
+          mkdir -p ~/.android
+          cp android-signing/bcb-debug.keystore ~/.android/debug.keystore
+
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
 
@@ -74,6 +84,13 @@ jobs:
 
             Install on Android: download the APK below, open it, and allow
             "install from unknown sources" when prompted. 18+ only.
+
+            ⚠️ **Upgrading from v0.7.0-alpha or earlier?** Those builds were each
+            signed with a different throwaway key, so Android will show
+            "App not installed" if you try to install over them. **Uninstall the
+            old Beach City Babes once**, then install this APK. From this release
+            onward every build shares one stable signature, so future updates
+            install straight over the top with no uninstall.
 
             This is a debug-signed alpha — expect rough edges. The web/PWA
             version at the repo README always has the newest build.
