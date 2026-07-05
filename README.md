@@ -124,6 +124,7 @@ WebView; the auto-update toast still functions since the game polls
 | `sw.js` / `version.json` / `js/version.js` | Versioned offline cache + update beacon |
 | `tools/make_icons.py` | Regenerates the 🍑 icon PNGs (Pillow) |
 | `tools/bump_version.py` | One-command release bump |
+| `tools/e2e/` | Playwright e2e suites: full loop, drama, AI chat (mocked), free generative chat + race safety, AI art |
 
 ## AI chat — generative conversation by default
 

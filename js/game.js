@@ -380,17 +380,26 @@ function renderPortrait(c, tier, heat) {
   }
 }
 
-function log(who, text) {
-  const c = active();
-  (S.logs[c.id] ??= []).push({ who, text });
-  if (S.logs[c.id].length > 60) S.logs[c.id].shift();
-  renderLog();
+// Always log to an EXPLICIT npc id: generative replies arrive after a network
+// round-trip, and by then the player may be in a different conversation — the
+// words must land in the log of whoever said them, never whoever is on screen.
+function logTo(npcId, who, text) {
+  (S.logs[npcId] ??= []).push({ who, text });
+  if (S.logs[npcId].length > 60) S.logs[npcId].shift();
+  if (S.activeId === npcId) renderLog();
 }
+
+const log = (who, text) => logTo(active().id, who, text);
+
+// Chat text is untrusted (LLM output from a third-party endpoint by default,
+// plus whatever the player types) — never let it into innerHTML unescaped.
+const escapeHtml = s => String(s).replace(/[&<>"']/g,
+  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 function renderLog() {
   const el = $('#chat-log');
   const entries = S.logs[active().id] ?? [];
-  el.innerHTML = entries.map(e => `<div class="bubble ${e.who}">${e.text}</div>`).join('');
+  el.innerHTML = entries.map(e => `<div class="bubble ${e.who}">${escapeHtml(e.text)}</div>`).join('');
   el.scrollTop = el.scrollHeight;
 }
 
@@ -706,9 +715,10 @@ function refreshChatBar() {
     : 'Nobody here — 🗺️ Travel to find people.';
 
   const chips = [];
-  // approach anyone else present
+  // approach anyone else present — but not while a reply is in flight, so a
+  // pending generative reply can't be cross-wired into another conversation
   for (const o of here) if (o.id !== c.id)
-    chips.push(`<button class="chip mini action" data-approach="${o.id}">💬 ${o.name}</button>`);
+    chips.push(`<button class="chip mini action" data-approach="${o.id}" ${awaitingReply ? 'disabled' : ''}>💬 ${o.name}</button>`);
   if (!activeScene && withThem) {
     const tier = tierFor(c);
     if (isInterested(c, playerForDialogue()) && tier >= 2 && c.agreement === 'none')
@@ -758,7 +768,13 @@ function sendTyped() {
 }
 
 // Compose the NPC's reply: LLM provider if wired, else offline procedural.
+// The provider await is a real network round-trip now, so everything after it
+// is guarded: S0 catches slot swaps (quit-to-title → load another save) and
+// replySeq stops a stale completion from unlocking a newer request's chat bar.
+let replySeq = 0;
 async function npcReply(c, text) {
+  const S0 = S;
+  const seq = ++replySeq;
   awaitingReply = true;
   refreshChatBar();
   const pl = playerForDialogue();
@@ -783,6 +799,8 @@ async function npcReply(c, text) {
     r = resolveTyped(c, pl, text, rng, roleData());
   }
 
+  if (S !== S0) return; // save slot changed mid-flight — this reply belongs to a dead world
+
   applyDelta(c, r.dAff, r.dDes);
   if (S.player.buffs.courage > 0) S.player.buffs.courage -= 1;
   const intent = r.nlu?.intent;
@@ -795,12 +813,15 @@ async function npcReply(c, text) {
   if (r.walk) c.walkedToday = true;
 
   setTimeout(() => {
-    npcSay(r.npcText);
-    if (r.special === 'transShare') {
+    if (S !== S0) return;
+    logTo(c.id, 'npc', r.npcText); // pinned to the speaker, not to active()
+    save();
+    const stillHere = S.activeId === c.id;
+    if (r.special === 'transShare' && stillHere) {
       openReplyScene(r.replyChoices, c);
     }
-    awaitingReply = false;
-    afterAction(r.emotion, r.success);
+    if (seq === replySeq) awaitingReply = false; // never unlock a newer request
+    if (stillHere) afterAction(r.emotion, r.success);
     refreshChatBar();
   }, 420);
 }
@@ -1252,6 +1273,7 @@ function openTextComposer(npcId) {
 }
 
 async function sendText(c, kind) {
+  const S0 = S; // guard: the reply must die with the save it belongs to
   S.player.textsSent[c.id] = (S.player.textsSent[c.id] ?? 0) + 1;
   const pl = playerForDialogue();
   const r = textExchange(c, pl, kind, rng);
@@ -1281,14 +1303,17 @@ async function sendText(c, kind) {
       if (out && typeof out === 'string') reply = out.trim().replace(/^📱\s*/, '');
     } catch { /* canned reply stands */ }
   }
+  if (S !== S0) return; // slot changed while the text was in flight
 
   setTimeout(() => {
-    npcSay(`📱 ${reply}`);
+    if (S !== S0) return;
+    logTo(c.id, 'npc', `📱 ${reply}`); // pinned to the sender, not to active()
+    save();
     if (kind === 'invite' && r.accepted) {
       advanceTime(1);
-      narrate(`📍 ${c.name} shows up twenty minutes later, exactly as promised.`);
+      logTo(c.id, 'sys', `📍 ${c.name} shows up twenty minutes later, exactly as promised.`);
     }
-    afterAction(emotionFor(c, tierFor(c)), r.accepted && r.dDes > 3);
+    if (S.activeId === c.id) afterAction(emotionFor(c, tierFor(c)), r.accepted && r.dDes > 3);
   }, 600);
 }
 
@@ -1663,11 +1688,14 @@ async function anthropicChat(playerText, persona) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model, max_tokens: 220,
+      model, max_tokens: 300,
+      // sonnet-5 runs adaptive thinking by default, which is billed AND eats
+      // the max_tokens budget — a short chat reply must be all visible text
+      thinking: { type: 'disabled' },
       system: personaSystemPrompt(persona),
       messages: personaMessages(persona, playerText),
     }),
-    signal: timeoutSignal(20000),
+    signal: timeoutSignal(12000),
   });
   if (!res.ok) { if (res.status === 401) toast('AI key rejected — check it in the menu.'); return null; }
   const data = await res.json();
@@ -1687,12 +1715,12 @@ async function freeChat(playerText, persona) {
         ...personaMessages(persona, playerText),
       ],
     }),
-    signal: timeoutSignal(15000),
+    signal: timeoutSignal(10000),
   });
   if (!res.ok) return null;
   const text = (await res.text()).trim();
-  // guard: some gateway errors come back 200 with a JSON error body
-  if (!text || text.startsWith('{"error"')) return null;
+  // guard: gateway errors/envelopes can come back 200 with JSON or HTML bodies
+  if (!text || text.startsWith('{') || text.startsWith('<')) return null;
   return text;
 }
 
