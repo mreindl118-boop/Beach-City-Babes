@@ -47,15 +47,35 @@ jobs:
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
                 android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
-      - name: Use the committed stable debug keystore
-        # Gradle's assembleDebug signs with ~/.android/debug.keystore. By default
-        # CI generates a throwaway one per run, so every release got a DIFFERENT
-        # signature and Android refused to update-install over the last one
-        # ("App not installed"). Dropping our committed keystore here gives every
-        # build — forever — the same signature, so updates install cleanly.
+      - name: Wire the committed stable debug keystore into Gradle
+        # Every CI run otherwise generates a throwaway debug keystore, so each
+        # release got a DIFFERENT signature under the same package id and Android
+        # refused to update-install over the last one ("App not installed").
+        # Merely dropping the keystore at ~/.android/debug.keystore did NOT work —
+        # the Capacitor project doesn't read that path. So point the debug
+        # signingConfig explicitly at our committed keystore. A second `android {}`
+        # block is legal Groovy and merges, reconfiguring the existing debug
+        # signingConfig. Now every build shares one signature forever.
         run: |
-          mkdir -p ~/.android
-          cp android-signing/bcb-debug.keystore ~/.android/debug.keystore
+          cp android-signing/bcb-debug.keystore android/app/bcb-debug.keystore
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          android {
+              signingConfigs {
+                  debug {
+                      storeFile file("bcb-debug.keystore")
+                      storePassword "android"
+                      keyAlias "androiddebugkey"
+                      keyPassword "android"
+                  }
+              }
+              buildTypes {
+                  debug {
+                      signingConfig signingConfigs.debug
+                  }
+              }
+          }
+          GRADLE
 
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
