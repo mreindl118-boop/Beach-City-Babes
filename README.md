@@ -125,6 +125,19 @@ WebView; the auto-update toast still functions since the game polls
 | `tools/make_icons.py` | Regenerates the 🍑 icon PNGs (Pillow) |
 | `tools/bump_version.py` | One-command release bump |
 
+## AI chat (optional — real generative NPCs)
+
+By default the babes talk through the offline procedural engine (intent
+understanding + contextual replies, no key needed). For **ChatGPT-quality,
+truly generative** conversation, open **☰ Menu → 🤖 AI Chat**, paste an
+Anthropic API key, and pick a model (Haiku = fast, Sonnet = balanced,
+Opus = best). The game then calls the Anthropic API directly from your
+browser and each character replies in-character, with real personality and
+boundaries — while your typed message still drives the affection/desire math.
+The key is stored only in your browser's localStorage and sent straight to
+Anthropic; costs bill to your account. Replies stay suggestive, never explicit.
+Advanced users can instead wire `window.BCB_CHAT_PROVIDER` themselves.
+
 ## Generated portraits (optional, bring your own backend)
 
 The SVG portraits are the default, but the pipeline accepts generated images:

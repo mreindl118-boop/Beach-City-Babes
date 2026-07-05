@@ -409,6 +409,27 @@ function applyDelta(c, dAff, dDes) {
   }
   c.lastSeenDay = S.player.day;
   clampStats(c, playerForDialogue());
+  floatDelta(dAff, dDes);
+}
+
+// Floating "+3 ♥ / +5 🔥" over the meters so the chat visibly moves the game.
+function floatDelta(dAff, dDes) {
+  const gs = $('#game-screen');
+  if (!gs || gs.classList.contains('hidden')) return;
+  const spawn = (txt, cls, anchor) => {
+    const el = anchor || $('#meters') || $('#char-panel');
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const d = document.createElement('div');
+    d.className = 'stat-float ' + cls;
+    d.textContent = txt;
+    d.style.left = `${r.left + r.width * (0.3 + Math.random() * 0.4)}px`;
+    d.style.top = `${r.top + 10}px`;
+    document.body.appendChild(d);
+    setTimeout(() => d.remove(), 1400);
+  };
+  if (dAff) spawn(`${dAff > 0 ? '+' : ''}${dAff} ♥`, dAff > 0 ? 'up' : 'down', $('#meter-aff'));
+  if (dDes) spawn(`${dDes > 0 ? '+' : ''}${dDes} 🔥`, dDes > 0 ? 'up' : 'down', $('#meter-des'));
 }
 
 function afterAction(emotion, good) {
@@ -1451,7 +1472,10 @@ async function registerSW() {
 }
 
 let updatePromptShown = false;
-async function checkForUpdate() {
+// Check version.json and, if a newer build shipped, prompt to apply it.
+// atBoot=true shows a full modal on a fresh startup (the player asked for this);
+// otherwise a tap-to-refresh toast mid-session.
+async function checkForUpdate(atBoot = false) {
   try {
     const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) return;
@@ -1460,13 +1484,119 @@ async function checkForUpdate() {
       updatePromptShown = true;
       const reg = await navigator.serviceWorker?.getRegistration();
       await reg?.update();
-      toast(`✨ Update v${remote.version} ready — tap to refresh!`, true, async () => {
-        const r = await navigator.serviceWorker?.getRegistration();
-        if (r?.waiting) r.waiting.postMessage({ type: 'SKIP_WAITING' });
-        else location.reload(true);
-      });
+      if (atBoot) showUpdateModal(remote); else
+      toast(`✨ Update v${remote.version} ready — tap to refresh!`, true, () => applyUpdate());
     }
   } catch { /* offline is fine */ }
+}
+
+function showUpdateModal(remote) {
+  openModal(`
+    <h3>✨ Update available</h3>
+    <p class="modal-text">A newer version of Beach City Babes is ready.<br>
+      You're on <b>v${VERSION}</b> · latest is <b>v${remote.version}</b>.</p>
+    <div class="stack">
+      <button class="btn primary" id="up-apply">⬇️ Apply update &amp; restart</button>
+      <button class="btn" id="up-later">Later</button>
+    </div>`);
+  $('#up-apply').onclick = () => applyUpdate();
+  $('#up-later').onclick = () => closeModal();
+}
+
+async function applyUpdate() {
+  try {
+    const r = await navigator.serviceWorker?.getRegistration();
+    if (r?.waiting) r.waiting.postMessage({ type: 'SKIP_WAITING' });
+    // clear caches so the new shell is fetched fresh, then hard reload
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+  } catch { /* ignore */ }
+  location.reload();
+}
+
+// ---------------- AI chat (optional, player supplies an API key) ----------------
+// Wires window.BCB_CHAT_PROVIDER to call the Anthropic API directly from the
+// browser so NPC replies are genuinely generative — ChatGPT-style. The player's
+// key lives only in their own localStorage. Falls back to the offline engine
+// whenever no key is set or a call fails.
+const AI_MODELS = [
+  { id: 'claude-haiku-4-5', label: 'Fast (Haiku 4.5)' },
+  { id: 'claude-sonnet-5', label: 'Balanced (Sonnet 5) — recommended' },
+  { id: 'claude-opus-4-8', label: 'Best (Opus 4.8)' },
+];
+
+function aiConfig() {
+  return {
+    key: localStorage.getItem('bcb_ai_key') || '',
+    model: localStorage.getItem('bcb_ai_model') || 'claude-sonnet-5',
+  };
+}
+
+function installChatProvider() {
+  const { key } = aiConfig();
+  if (!key) { window.BCB_CHAT_PROVIDER = null; return; }
+  window.BCB_CHAT_PROVIDER = async (playerText, persona, ctx) => {
+    const { key, model } = aiConfig();
+    if (!key) return null;
+    const sys = [
+      `You are ${persona.name}, ${persona.age}, a character in a flirty beach-town dating sim. Pronouns: ${persona.pronouns}.`,
+      `Personality: ${persona.personality}. Current mood: ${persona.mood}. Relationship with the player: ${persona.relationship}${persona.agreement && persona.agreement !== 'none' ? ' (' + persona.agreement + ')' : ''}.`,
+      persona.interested ? 'You ARE romantically/sexually interested in the player.' : 'You are NOT romantically interested in the player — keep it friendly, deflect flirting warmly.',
+      persona.turnoffs?.length ? `Turn-offs: ${persona.turnoffs.join(', ')}.` : '',
+      'Stay fully in character. Reply as this person would — witty, warm, flirty when it fits. You have real boundaries and self-respect: you are NOT a pushover. Push back on anything creepy, boring, rude, or too-fast, and let attraction build over time.',
+      'TONE CEILING: keep it suggestive and playful — innuendo and teasing are great, but never write sexually explicit content. Fade to black at the bedroom door.',
+      'Reply with ONLY your spoken response, 1–3 sentences, no narration, no quotation marks, no name prefix.',
+    ].filter(Boolean).join('\n');
+    const messages = [];
+    for (const line of (persona.recent || [])) {
+      const isMe = line.startsWith(persona.playerName + ':') || /^me:|^you:/i.test(line);
+      messages.push({ role: isMe ? 'user' : 'assistant', content: line.replace(/^[^:]+:\s*/, '') });
+    }
+    messages.push({ role: 'user', content: playerText });
+    if (!messages.length || messages[0].role !== 'user') messages.unshift({ role: 'user', content: 'hi' });
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({ model, max_tokens: 200, system: sys, messages }),
+      });
+      if (!res.ok) { if (res.status === 401) toast('AI key rejected — check it in the menu.'); return null; }
+      const data = await res.json();
+      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+      return text || null;
+    } catch { return null; }
+  };
+}
+
+function openAISettings() {
+  const { key, model } = aiConfig();
+  openModal(`
+    <h3>🤖 AI Chat (beta)</h3>
+    <p class="modal-text">Make the babes talk with a real language model — genuinely generative, in-character replies. Paste your <b>Anthropic API key</b> below. It's stored only on this device and sent straight to Anthropic. Leave blank to use the built-in offline chat.</p>
+    <div class="stack">
+      <input id="ai-key" type="password" placeholder="sk-ant-..." value="${key ? '••••••••' : ''}" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px">
+      <label class="modal-text" style="margin:0">Model</label>
+      <select id="ai-model" style="width:100%;padding:11px 14px;border-radius:12px;border:2px solid var(--pink);font-size:14px;background:#fff">
+        ${AI_MODELS.map(m => `<option value="${m.id}" ${m.id === model ? 'selected' : ''}>${m.label}</option>`).join('')}
+      </select>
+      <button class="btn primary" id="ai-save">Save</button>
+      ${key ? '<button class="btn danger" id="ai-clear">Remove key (use offline chat)</button>' : ''}
+      <p class="modal-text" style="font-size:11.5px">Your key stays in this browser's storage. Costs are billed to your Anthropic account. Get a key at console.anthropic.com. Replies stay suggestive, never explicit.</p>
+    </div>`);
+  $('#ai-save').onclick = () => {
+    const v = $('#ai-key').value.trim();
+    if (v && v !== '••••••••') localStorage.setItem('bcb_ai_key', v);
+    localStorage.setItem('bcb_ai_model', $('#ai-model').value);
+    installChatProvider();
+    closeModal();
+    toast(aiConfig().key ? '🤖 AI chat on — the babes are alive.' : 'Using offline chat.');
+  };
+  const clear = $('#ai-clear');
+  if (clear) clear.onclick = () => { localStorage.removeItem('bcb_ai_key'); installChatProvider(); closeModal(); toast('AI key removed — offline chat.'); };
 }
 
 // ---------------- boot ----------------
@@ -1481,13 +1611,18 @@ function bindUI() {
   $('#cc-back').onclick = () => { show('#title-screen'); renderTitle(); };
   $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
   $('#btn-menu').onclick = () => {
+    const aiOn = !!aiConfig().key;
     openModal(`
       <h3>⚙️ Menu</h3>
       <div class="stack">
+        <button class="btn primary" id="m-ai">🤖 AI Chat ${aiOn ? '(on)' : '(off)'}</button>
+        <button class="btn" id="m-update">🔄 Check for updates</button>
         <button class="btn" id="m-title">💾 Save & quit to title</button>
         <p class="modal-text">Beach City Babes v${VERSION} (build ${BUILD})<br>
-        Autosaves constantly. Auto-updates when a new version ships. 🍑</p>
+        Autosaves constantly. Checks for updates on startup. 🍑</p>
       </div>`);
+    $('#m-ai').onclick = openAISettings;
+    $('#m-update').onclick = async () => { updatePromptShown = false; closeModal(); toast('Checking…'); await checkForUpdate(true); if (!updatePromptShown) toast('You’re on the latest version. ✓'); };
     $('#m-title').onclick = () => { save(); closeModal(); show('#title-screen'); renderTitle(); };
   };
   $('#btn-texts').onclick = openPhone;
@@ -1518,11 +1653,12 @@ function boot() {
     renderTitle();
   }
   show('#title-screen');
+  installChatProvider();
   registerSW();
-  checkForUpdate();
-  setInterval(checkForUpdate, 10 * 60 * 1000);
+  checkForUpdate(true); // prompt to apply on fresh startup
+  setInterval(() => checkForUpdate(false), 10 * 60 * 1000);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) checkForUpdate();
+    if (!document.hidden) checkForUpdate(false);
   });
 }
 

@@ -326,3 +326,16 @@ body.night .iconbtn { color: #ffe9f1; }
 /* ---------- intimate dates ---------- */
 .shop-item.intimate { border-color: #ff2d6f; background: linear-gradient(180deg,#fff,#ffe6ef); }
 .shop-item.intimate .shop-cost { color: #c2400e; }
+
+/* ---------- floating stat deltas + AI settings ---------- */
+.stat-float {
+  position: fixed; z-index: 85; pointer-events: none; font-weight: 800; font-size: 15px;
+  animation: statfloat 1.4s ease-out forwards; text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.stat-float.up { color: #ff2d6f; }
+.stat-float.down { color: #6a6a7a; }
+@keyframes statfloat {
+  0% { opacity: 0; transform: translateY(4px) scale(0.8); }
+  20% { opacity: 1; transform: translateY(-4px) scale(1.1); }
+  100% { opacity: 0; transform: translateY(-34px) scale(1); }
+}

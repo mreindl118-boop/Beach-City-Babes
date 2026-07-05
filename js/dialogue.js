@@ -1105,6 +1105,7 @@ export function chatPersona(c, player, recentLog) {
   const p = pronounsOf(c);
   return {
     name: c.name, age: c.age, pronouns: p.label,
+    playerName: player.name,
     personality: `${arch.label}: ${arch.desc}`,
     job: c.known.job ? c.job : 'undisclosed',
     relationship: tierLabelSafe(c),

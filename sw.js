@@ -1,6 +1,6 @@
 // Service worker: offline play + versioned cache for auto-update.
 // VERSION is kept in sync with js/version.js + version.json by tools/bump_version.py.
-const VERSION = '0.6.0-alpha';
+const VERSION = '0.7.0-alpha';
 const CACHE = `bcb-v${VERSION}`;
 
 const SHELL = [
@@ -37,23 +37,28 @@ self.addEventListener('message', e => {
 });
 
 self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   // version.json is the update beacon — always hit the network for it
   if (url.pathname.endsWith('/version.json')) {
     e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
     return;
   }
-  // shell: stale-while-revalidate — fast offline play, fresh next launch
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      const fetched = fetch(e.request).then(res => {
-        if (res.ok && e.request.method === 'GET' && url.origin === location.origin) {
+  // Network-first for our own code/assets: an online player always runs the
+  // newest build; the cache is only a fallback when offline. (Stale-while-
+  // revalidate served old JS for a whole extra launch — that broke updates.)
+  if (url.origin === location.origin) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => cached);
-      return cached || fetched;
-    })
-  );
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // cross-origin: cache-first
+  e.respondWith(caches.match(e.request).then(c => c || fetch(e.request)));
 });
