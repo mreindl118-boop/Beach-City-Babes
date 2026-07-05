@@ -363,3 +363,57 @@ export const GROUP_SCENES = [
 ];
 
 export const GROUP_HANGOUT = { cost: 20, hours: 3, aff: 9, des: 7, pub: 0.6 };
+
+// ---------- Afterglow: the adult shop (a place you visit, evenings/nights) ----------
+// Scandalous goods. Toys/lube deepen intimate dates; protection guards against
+// the STD system. Only stocked at the shop location, only after dark.
+export const ADULT_ITEMS = [
+  { id: 'condoms',  name: 'Box of Condoms',      emoji: '🍌', cost: 12, kind: 'protection', qty: 6,
+    desc: 'Safety first. Each intimate night uses one — no protection means risk.' },
+  { id: 'lube',     name: 'Silky Lube',          emoji: '🧴', cost: 14, kind: 'spice',
+    desc: 'Makes intimate dates land noticeably harder. Reusable.' },
+  { id: 'toy',      name: 'Buzzy Little Friend',  emoji: '🔮', cost: 45, kind: 'spice', minTier: 2,
+    desc: 'Unlocks bolder moves on intimate dates. They will not forget it.' },
+  { id: 'blindfold',name: 'Silk Blindfold',      emoji: '🎀', cost: 30, kind: 'kink', minTier: 3,
+    desc: 'A key that opens Kink Night. Trust required.' },
+  { id: 'cuffs',    name: 'Fuzzy Cuffs',         emoji: '⛓️', cost: 34, kind: 'kink', minTier: 3,
+    desc: 'For Kink Night. Playful, consensual, unforgettable.' },
+  { id: 'test',     name: 'At-Home Test Kit',    emoji: '🧪', cost: 20, kind: 'health',
+    desc: 'Check your status in private. Peace of mind in a box.' },
+];
+
+// ---------- STD / sexual-health system ----------
+// Intimate nights without protection carry a small risk of picking something
+// up. It quietly lowers desire and reputation until treated at the clinic.
+export const STD_RISK_UNPROTECTED = 0.14;   // per unprotected intimate night
+export const STD_RISK_PROTECTED = 0.01;     // protection is not a force field
+export const CLINIC_TEST_COST = 15;
+export const CLINIC_TREAT_COST = 60;
+export const STDS = [
+  { id: 'itch',  name: 'a nasty itch',        emoji: '🦠' },
+  { id: 'bug',   name: 'a summer bug',        emoji: '🤒' },
+  { id: 'crabs', name: 'unwelcome houseguests', emoji: '🦀' },
+];
+
+// ---------- Intimate dates (gated by relationship + private setting) ----------
+// Suggestive fade-to-black scenes with real stakes: they can be refused, they
+// consume protection (or risk the STD system), and the spicier ones need items
+// or a whole polycule. minTier gates them behind the relationship ladder.
+export const INTIMATE_DATES = [
+  { id: 'sensual', name: 'Sensual Night In', emoji: '🕯️', minTier: 2, hours: 3, pub: 0.05,
+    aff: 8, des: 26, rep: 1, intimate: true,
+    desc: 'Candles, slow music, a locked door. Needs the Dating tier.',
+    scene: 'Candlelight, a shared bottle, and all the time in the world. The rest fades to a warm, knowing dark.' },
+  { id: 'toybox', name: 'Toy Box Night', emoji: '🔮', minTier: 2, hours: 3, pub: 0.05,
+    aff: 6, des: 34, rep: 1, intimate: true, needs: 'spice',
+    desc: 'You brought a little something from Afterglow. Needs a spice item.',
+    scene: 'You unwrap your little surprise. {name}’s eyebrows climb, then their smile does. Lights out.' },
+  { id: 'kink', name: 'Kink Night', emoji: '🎀', minTier: 3, hours: 3, pub: 0.05,
+    aff: 10, des: 42, rep: 2, intimate: true, needs: 'kink',
+    desc: 'Trust, a safeword, and one of your Afterglow toys. Lovers only.',
+    scene: 'Rules set, safeword agreed, blindfold on. What happens next is between you two and the dark.' },
+  { id: 'orgy', name: 'Playroom Party', emoji: '🎭', minTier: 3, hours: 4, pub: 0.35,
+    aff: 8, des: 40, rep: 3, intimate: true, group: true,
+    desc: 'You, and more than one of your open lovers. Everyone honest, everyone in.',
+    scene: 'The whole honest, tangled, laughing lot of you behind one very locked door. The night belongs to nobody and everybody.' },
+];

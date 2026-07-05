@@ -322,3 +322,7 @@ body.night .iconbtn { color: #ffe9f1; }
 .map-hot.closed { cursor: not-allowed; opacity: 0.55; }
 .here-pulse { animation: herepulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes herepulse { 0%,100% { transform: scale(0.9); opacity: 0.18; } 50% { transform: scale(1.15); opacity: 0.3; } }
+
+/* ---------- intimate dates ---------- */
+.shop-item.intimate { border-color: #ff2d6f; background: linear-gradient(180deg,#fff,#ffe6ef); }
+.shop-item.intimate .shop-cost { color: #c2400e; }

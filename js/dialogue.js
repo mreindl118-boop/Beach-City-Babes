@@ -1138,10 +1138,11 @@ export function dateOffer(c, player, act, rng) {
   }
   let p = 0.9
     + (player.reputation ?? 0) / 220        // being well-liked in town helps
-    - Math.max(0, (act.minAff + 12 - c.affection)) / 55  // asking big too early
+    - Math.max(0, ((act.minAff || 0) + 12 - c.affection)) / 55  // asking big too early
     - (c.standards - 0.6) * 0.35
-    + c.mood * 0.12;
-  if (act.intimate) p -= 0.45 + Math.max(0, act.minTier - tier) * 0.2;
+    + c.mood * 0.12
+    + (c.partner ? 0.5 : 0);                // your established lover is happy to
+  if (act.intimate) p -= (c.partner ? 0.12 : 0.45) + Math.max(0, (act.minTier || 0) - tier) * 0.2;
   p = Math.max(0.08, Math.min(0.97, p));
   if (rng.chance(p)) {
     return { accepted: true, line: fill(rng.pick([

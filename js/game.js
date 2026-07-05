@@ -5,6 +5,8 @@ import {
   FINALE_MIN_AFF, FINALE_MIN_DES, tierFor, tierLabel, ARCHETYPES,
   STAT_DEFS, BOOSTS, HUSTLES, TEXT_KINDS, TEXTS_PER_NPC_PER_DAY,
   REL_LABELS, AGREEMENT_LABELS, GROUP_SCENES, GROUP_HANGOUT,
+  ADULT_ITEMS, INTIMATE_DATES, STDS, STD_RISK_UNPROTECTED, STD_RISK_PROTECTED,
+  CLINIC_TEST_COST, CLINIC_TREAT_COST,
 } from './data.js';
 import {
   generateCharacter, archetypeOf, quirkOf, pronounsOf, isInterested,
@@ -68,6 +70,9 @@ function newState(playerDef, slot) {
       day: 1, hour: 9, heartsWon: 0,
       location: startLoc,
       reputation: 0,      // town-wide standing; bad public moves sink it
+      condoms: 0,         // protection stock (bought at the adult shop)
+      std: null,          // active infection id, or null
+      stdKnown: false,    // whether the player has been tested for it
       stats: { ...ROLE_STATS[playerDef.role] },
       mojo: 0,             // earned sexual confidence — amplifies desire gains
       inv: {},             // boostId -> count
@@ -112,6 +117,10 @@ function migrate(data) {
   data.worldSeed ??= (hashStr(data.slot + ':' + (data.npcs?.[0]?.id || 'x')) >>> 0) || 12345;
   p.location ??= 'beach';
   p.reputation ??= 0;
+  // adult shop / health fields
+  p.condoms ??= 0;
+  p.std ??= null;
+  p.stdKnown ??= false;
   for (const c of data.npcs ?? []) ensureSchedule(c, data.worldSeed);
   return data;
 }
@@ -812,10 +821,25 @@ function giveGift(gift) {
   }, 420);
 }
 
+function hasItemKind(kind) {
+  return ADULT_ITEMS.some(it => it.kind === kind && S.player.inv[it.id]);
+}
+
 function openDates() {
   const c = active();
+  const tier = tierFor(c);
   const buddy = groupCandidateFor(c);
   const groupOk = buddy && S.player.coins >= GROUP_HANGOUT.cost;
+  // which intimate dates are available with this person right now
+  const lovers = S.npcs.filter(x => x.partner || (x.agreement === 'open' && tierFor(x) >= 2 && isInterested(x, playerForDialogue())));
+  const intimate = INTIMATE_DATES.map(d => {
+    let lock = null;
+    if (tier < d.minTier) lock = `🔒 ${tierLabel(d.minTier)}`;
+    else if (d.needs && !hasItemKind(d.needs)) lock = '🔒 need Afterglow item';
+    else if (d.group && lovers.length < 2) lock = '🔒 need 2 open lovers';
+    else if (S.player.coins < 0) lock = '🪙';
+    return { d, lock };
+  });
   const body = `
     <h3>🌴 Take ${c.name} out</h3>
     ${buddy ? `<button class="btn choice warm" id="group-date" ${groupOk ? '' : 'disabled'} style="width:100%;margin-bottom:8px">
@@ -824,17 +848,29 @@ function openDates() {
       ${ACTIVITIES.map(a => {
         const locked = c.affection < a.minAff;
         const poor = S.player.coins < a.cost;
-        const late = S.player.hour + a.hours > 24 && !['midnight', 'stars', 'hottub', 'dance'].includes(a.id);
         const off = locked || poor;
         return `<button class="shop-item ${off ? 'off' : ''}" data-act="${a.id}" ${off ? 'disabled' : ''}>
           <span class="shop-emoji">${a.emoji}</span><span>${a.name}</span>
           <span class="shop-cost">${locked ? `🔒 ♥ ${a.minAff}` : `🪙 ${a.cost} · ${a.hours}h`}</span>
         </button>`;
       }).join('')}
-    </div>`;
+    </div>
+    <h3 style="margin-top:14px">🔥 Intimate <span style="font-size:12px;font-weight:400;color:#8a6b78">— fade to black, real stakes</span></h3>
+    <div class="shop-grid">
+      ${intimate.map(({ d, lock }) => `
+        <button class="shop-item ${lock ? 'off' : 'intimate'}" data-intimate="${d.id}" ${lock ? 'disabled' : ''} title="${d.desc}">
+          <span class="shop-emoji">${d.emoji}</span><span>${d.name}</span>
+          <span class="shop-cost">${lock || `🪙 ${d.hours}h`}</span>
+        </button>`).join('')}
+    </div>
+    <p class="modal-text" style="font-size:11.5px">🍌 Protection: ${S.player.condoms ?? 0} · ${S.player.std && S.player.stdKnown ? '⚠️ see the clinic' : 'buy toys & condoms at 🔞 Afterglow'}</p>`;
   openModal(body);
   const gd = $('#group-date');
   if (gd) gd.onclick = () => { closeModal(); goGroupDate(c, buddy); };
+  $('#modal-body').querySelectorAll('[data-intimate]').forEach(b => b.onclick = () => {
+    closeModal();
+    goIntimate(INTIMATE_DATES.find(d => d.id === b.dataset.intimate));
+  });
   $('#modal-body').querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
     closeModal();
     goDate(ACTIVITIES.find(a => a.id === b.dataset.act));
@@ -874,6 +910,165 @@ function goDate(act) {
 // creepy strikes, and blowups sink it. Gates how warily strangers greet you.
 function adjustRep(delta) {
   S.player.reputation = Math.max(-100, Math.min(100, (S.player.reputation ?? 0) + delta));
+}
+
+// ---------------- intimate dates ----------------
+function goIntimate(dt) {
+  const c = active();
+  const haveCondom = (S.player.condoms ?? 0) > 0;
+  // let the player choose protection when they have it
+  const body = `
+    <h3>${dt.emoji} ${dt.name}</h3>
+    <p class="modal-text">${dt.desc}</p>
+    <div class="stack">
+      <button class="btn primary" id="int-safe" ${haveCondom ? '' : 'disabled'}>🍌 Use protection ${haveCondom ? `(${S.player.condoms} left)` : '(none — buy at Afterglow)'}</button>
+      <button class="btn" id="int-raw">🎲 Skip it (risky)</button>
+      <button class="btn" id="int-cancel">↩︎ Not tonight</button>
+    </div>`;
+  openModal(body);
+  const sb = $('#int-safe'); if (sb) sb.onclick = () => { closeModal(); runIntimate(dt, true); };
+  $('#int-raw').onclick = () => { closeModal(); runIntimate(dt, false); };
+  $('#int-cancel').onclick = () => closeModal();
+}
+
+function runIntimate(dt, protectedNight) {
+  const c = active();
+  narrate(`You invite ${c.name} to ${dt.emoji.trim()} ${dt.name.toLowerCase()}.`);
+  const offer = dateOffer(c, playerForDialogue(), dt, rng);
+  if (!offer.accepted) {
+    applyDelta(c, offer.affHit || -3, -2);
+    if (offer.repHit) adjustRep(offer.repHit);
+    if (rng.chance(0.5)) c.mood = Math.max(-2, c.mood - 1);
+    setTimeout(() => { npcSay(offer.line); afterAction(offer.emotion || 'annoyed', false); }, 400);
+    return;
+  }
+  npcSay(offer.line);
+  if (protectedNight && (S.player.condoms ?? 0) > 0) S.player.condoms -= 1;
+  advanceTime(dt.hours);
+  // spice/kink item bonus
+  const bonus = (dt.needs && hasItemKind(dt.needs)) ? 1.25 : 1;
+  const scene = dt.scene.replaceAll('{name}', c.name);
+  narrate(`${dt.emoji} ${scene}`);
+  applyDelta(c, dt.aff, Math.round(dt.des * bonus));
+  adjustRep(dt.rep);
+  c._datedToday = true;
+  registerRomance(c, dt.pub);
+  if (dt.group) {
+    // the polycule shares the afterglow
+    for (const m of S.npcs) if (m.id !== c.id && m.agreement === 'open' && tierFor(m) >= 2 && isInterested(m, playerForDialogue())) {
+      applyDelta(m, 4, 12); m._datedToday = true;
+    }
+  }
+  // STD roll — protection is not a force field, but it matters a lot
+  const risk = protectedNight ? STD_RISK_PROTECTED : STD_RISK_UNPROTECTED;
+  if (!S.player.std && rng.chance(risk)) {
+    S.player.std = rng.pick(STDS).id;
+    S.player.stdKnown = false;
+  }
+  setTimeout(() => {
+    npcSay(rng.pick([
+      'Okay. THAT just happened. *breathless laugh* Wow.',
+      '...I’m keeping you. That’s decided now.',
+      'Give me a minute. My legs forgot how legs work.',
+    ]));
+    afterAction('sultry', true);
+  }, 700);
+}
+
+// ---------------- location services (here) ----------------
+function openHere() {
+  const loc = locationById(S.player.location) || LOCATIONS[0];
+  if (loc.adult) return openAdultShop();
+  if (loc.clinic) return openClinic();
+  const here = presentNPCs();
+  const body = `
+    <h3>${loc.emoji} ${loc.name}</h3>
+    <p class="modal-text">${loc.vibe[0].toUpperCase() + loc.vibe.slice(1)}.
+      ${here.length ? `Around you: <b>${here.map(c => c.name).join(', ')}</b>.` : 'Pretty quiet right now.'}</p>
+    <div class="stack">
+      ${loc.hustle ? `<button class="btn" id="here-hustle">💪 Put in work here (see Hustle)</button>` : ''}
+      ${(loc.acts || []).length ? `<p class="modal-text">Good spot for: ${loc.acts.map(a => (ACTIVITIES.find(x => x.id === a) || {}).name).filter(Boolean).join(', ')}. Use 🌴 Date.</p>` : ''}
+      <button class="btn" id="here-look">👀 Look around</button>
+    </div>`;
+  openModal(body);
+  const hb = $('#here-hustle'); if (hb) hb.onclick = () => { closeModal(); openHustle(); };
+  $('#here-look').onclick = () => {
+    closeModal();
+    narrate(rng.pick([
+      `${loc.emoji} You take in ${loc.name}. ${loc.vibe[0].toUpperCase() + loc.vibe.slice(1)}.`,
+      here.length ? `You catch ${rng.pick(here).name} glancing your way.` : 'Nobody worth mentioning is around.',
+    ]));
+  };
+}
+
+// The adult shop — only at Afterglow, only after dark.
+function openAdultShop() {
+  const anyLover = S.npcs.some(c => tierFor(c) >= 2 && isInterested(c, playerForDialogue()));
+  const body = `
+    <h3>🔞 Afterglow</h3>
+    <p class="modal-text">Velvet ropes, warm lighting, zero judgment. Condoms: <b>${S.player.condoms ?? 0}</b>.</p>
+    <div class="shop-grid">
+      ${ADULT_ITEMS.map(it => {
+        const owned = it.kind === 'protection' ? false : !!S.player.inv[it.id];
+        const gated = it.minTier && !anyLover;
+        const poor = S.player.coins < it.cost;
+        const off = owned || gated || poor;
+        return `<button class="shop-item ${off ? 'off' : ''}" data-item="${it.id}" ${off ? 'disabled' : ''}>
+          <span class="shop-emoji">${it.emoji}</span><span>${it.name}</span>
+          <span class="shop-cost">${owned ? '✓ owned' : gated ? '🔒 need a lover' : '🪙 ' + it.cost}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <p class="modal-text" style="font-size:12px">Toys &amp; kink gear unlock the spicier intimate dates. Protection keeps you safe.</p>`;
+  openModal(body);
+  $('#modal-body').querySelectorAll('[data-item]').forEach(b => b.onclick = () => buyAdult(b.dataset.item));
+}
+
+function buyAdult(id) {
+  const it = ADULT_ITEMS.find(x => x.id === id);
+  if (!it || S.player.coins < it.cost) return;
+  S.player.coins -= it.cost;
+  if (it.kind === 'protection') S.player.condoms = (S.player.condoms ?? 0) + it.qty;
+  else if (it.id === 'test') doSelfTest();
+  else S.player.inv[it.id] = (S.player.inv[it.id] ?? 0) + 1;
+  renderTopbar();
+  save();
+  if (it.id !== 'test') openAdultShop();
+}
+
+function doSelfTest() {
+  closeModal();
+  const s = S.player.std;
+  narrate(s ? `🧪 The test confirms it: ${STDS.find(x => x.id === s)?.name || 'something'}. Time to see the clinic.`
+    : '🧪 The test is clean. All clear. Carry on, you magnificent menace.');
+}
+
+// The clinic — test and treatment, only during clinic hours.
+function openClinic() {
+  const s = S.player.std;
+  const body = `
+    <h3>🏥 Bay Health Clinic</h3>
+    <p class="modal-text">Clean, kind, confidential. ${s ? 'Something feels off lately, doesn’t it?' : 'Everything looks healthy so far.'}</p>
+    <div class="stack">
+      <button class="btn ${S.player.coins < CLINIC_TEST_COST ? 'off' : ''}" id="cl-test" ${S.player.coins < CLINIC_TEST_COST ? 'disabled' : ''}>🧪 Get tested (🪙 ${CLINIC_TEST_COST})</button>
+      <button class="btn ${(!s || S.player.coins < CLINIC_TREAT_COST) ? 'off' : 'primary'}" id="cl-treat" ${(!s || S.player.coins < CLINIC_TREAT_COST) ? 'disabled' : ''}>💊 Treatment (🪙 ${CLINIC_TREAT_COST})</button>
+    </div>`;
+  openModal(body);
+  $('#cl-test').onclick = () => {
+    S.player.coins -= CLINIC_TEST_COST; S.player.stdKnown = true;
+    closeModal();
+    narrate(s ? `🏥 The nurse is gentle about it: you’ve picked up ${STDS.find(x => x.id === s)?.name}. Treatable. Come back for treatment.`
+      : '🏥 All clear! The nurse gives you a lollipop and a wink.');
+    renderTopbar(); save();
+  };
+  $('#cl-treat').onclick = () => {
+    if (!S.player.std) return;
+    S.player.coins -= CLINIC_TREAT_COST;
+    S.player.std = null; S.player.stdKnown = false;
+    closeModal();
+    narrate('💊 A quick course of treatment and you’re good as new. Lesson learned — Afterglow sells protection for a reason.');
+    renderTopbar(); renderChar(); save();
+  };
 }
 
 function openHustle() {
@@ -1081,6 +1276,16 @@ function doSleep() {
   // day-scoped buffs and phone limits reset with the sunrise
   S.player.buffs = {};
   S.player.textsSent = {};
+  // an untreated infection quietly drags on your desire and, once it shows, rep
+  if (S.player.std) {
+    for (const c of S.npcs) c.desire = Math.max(0, c.desire - 3);
+    if (S.player.stdKnown) adjustRep(-1);
+    if (!S.player.stdKnown && rng.chance(0.4)) {
+      const s = STDS.find(x => x.id === S.player.std);
+      S.texts.push({ npcId: S.activeId, read: false, day: S.player.day,
+        text: `Hey… this is awkward, but you should get checked out. I did. ${s ? s.emoji : ''}` });
+    }
+  }
   narrate(`🌙 You sleep. Day ${S.player.day} dawns over Beach City.`);
   renderAll();
   flushTextsBadge();
@@ -1296,6 +1501,7 @@ function bindUI() {
       if (a === 'hustle') openHustle();
       if (a === 'items') openInventory();
       if (a === 'phone') openPhone();
+      if (a === 'here') openHere();
       if (a === 'sleep') doSleep();
       if (a === 'travel') openMap();
       if (a === 'roster') openRoster();
