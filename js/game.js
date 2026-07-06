@@ -2050,7 +2050,7 @@ function openArtSettings() {
   openModal(`
     <h3>🖼️ AI Art</h3>
     <p class="modal-text">Draw every character with a real image model. The default
-    (<b>Generative AI art</b>) needs no key — the babes render as generated anime pin-ups
+    (<b>Generative AI art</b>) needs no key — the babes render as generated anime pin-ups in various stages of undress based on relationship
     straight away. Bring an OpenAI key or a local Stable Diffusion endpoint for more control.
     The drawn sticker art always shows first and stays the offline fallback.</p>
     <div class="stack">
