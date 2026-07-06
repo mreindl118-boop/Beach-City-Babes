@@ -412,9 +412,9 @@ const HAIRSTYLE_WORDS = {
 const EXPR_WORDS = {
   neutral: 'calm confident expression', smug: 'smug little smile', teasing: 'playful teasing smirk',
   happy: 'bright warm smile', laugh: 'laughing, eyes closed', shy: 'shy blush, glancing away',
-  love: 'loving gaze with sparkling eyes', sultry: 'seductive half-lidded bedroom eyes, faint blush',
+  love: 'loving gaze with sparkling eyes', sultry: 'seductive half-lidded bedroom eyes, faint blush, undressed, presenting, wet,',
   annoyed: 'unimpressed arched-brow frown', sad: 'soft downcast expression', kiss: 'coy pursed-lip look',
-};
+  };
 
 // Danbooru-flavoured body tags from the continuous measurement genes, so bustier
 // / curvier characters actually read differently in the generated art.
