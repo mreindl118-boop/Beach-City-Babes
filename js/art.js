@@ -577,12 +577,12 @@ export function finalePrompt(c, player, opts = {}) {
     : (opts.desire ?? 0) >= 85 ? 'pulled tight together, foreheads touching'
     : 'leaning into each other, fingers laced';
   return [
-    'masterpiece, best quality, breathtaking romantic anime illustration, cinematic wide shot,',
+    'masterpiece, best quality, breathtaking romantic anime sexual illustration, cinematic wide shot,',
     'a couple at a beach bonfire at night, embers and fireflies rising, moonlit ocean behind,',
     `a beautiful adult ${gender} with ${hairStyle}, two-tone ${hairBase} hair with vivid ${accentName} tips, in beachwear,`,
-    `and their adult ${plGender} partner in beachwear, ${closeness}, about to kiss,`,
+    `and their adult ${plGender} partner in beachwear, ${closeness}, about to kiss and undressing,`,
     'firelight rim lighting, deep blue night palette with warm orange glow, fireworks far in the sky,',
-    'tender, intimate, suggestive but tasteful, fully clothed beachwear, safe-for-work, fade-to-black romance',
+    'tender, intimate, suggestive explicit, partially or compleatly unclothed beachwear, nsfw, steamy romance',
   ].join(' ');
 }
 
