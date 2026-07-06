@@ -446,7 +446,7 @@ export function portraitSeed(c, heat = 0) {
 
 // Quality/safety guardrails handed to providers that accept a negative prompt.
 export const NEGATIVE_PROMPT =
-  'nsfw, nude, nudity, explicit, genitalia, nipples, lowres, bad anatomy, bad hands, ' +
+  'lowres, bad anatomy, bad hands, ' +
   'extra limbs, extra fingers, fused fingers, deformed, disfigured, watermark, signature, ' +
   'text, jpeg artifacts, ugly, blurry, child, underage, loli, shota';
 
