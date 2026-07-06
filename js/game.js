@@ -2,7 +2,7 @@
 import { RNG, randomSeed } from './rng.js';
 import {
   GIFTS, ACTIVITIES, ROLES, GENDER_LABELS, BODY_LABELS, PRONOUN_SETS,
-  FINALE_MIN_AFF, FINALE_MIN_DES, tierFor, tierLabel, ARCHETYPES,
+  FINALE_MIN_AFF, FINALE_MIN_DES, tierFor, tierLabel, TIERS, ARCHETYPES,
   STAT_DEFS, BOOSTS, HUSTLES, TEXT_KINDS, TEXTS_PER_NPC_PER_DAY,
   REL_LABELS, AGREEMENT_LABELS, GROUP_SCENES, GROUP_HANGOUT,
   ADULT_ITEMS, INTIMATE_DATES, STDS, STD_RISK_UNPROTECTED, STD_RISK_PROTECTED,
@@ -380,6 +380,13 @@ function renderChar(forcePortrait = false) {
     c.agreement !== 'none' ? `<span class="chip mini agree">${AGREEMENT_LABELS[c.agreement]}</span>` : '',
     c.known.type && !interested ? `<span class="chip mini friend">friends 🤝</span>` : '',
   ].join('');
+
+  // relationship-tier track — a clear "where are we heading" ladder
+  const TIER_ICONS = ['👋', '😉', '💕', '🔥'];
+  $('#tier-track').innerHTML = TIERS.map((row, i) => {
+    const state = i < tier ? 'done' : i === tier ? 'now' : 'todo';
+    return `<div class="tier-step ${state}"><span class="ts-ico">${TIER_ICONS[i]}</span><span class="ts-lbl">${row.label}</span></div>`;
+  }).join('<span class="tier-arrow">›</span>');
 
   $('#meter-aff .fill').style.width = `${c.affection}%`;
   $('#meter-des .fill').style.width = `${c.desire}%`;
@@ -1129,6 +1136,12 @@ function hasItemKind(kind) {
   return ADULT_ITEMS.some(it => it.kind === kind && S.player.inv[it.id]);
 }
 
+// A visible heat rating on each date card: hotter dates burn brighter.
+function heatPips(des) {
+  const n = Math.max(1, Math.min(5, Math.round((des ?? 0) / 9)));
+  return '🔥'.repeat(n) + `<span class="pip-dim">${'🔥'.repeat(5 - n)}</span>`;
+}
+
 function openDates() {
   const c = active();
   const tier = tierFor(c);
@@ -1155,6 +1168,7 @@ function openDates() {
         const off = locked || poor;
         return `<button class="shop-item ${off ? 'off' : ''}" data-act="${a.id}" ${off ? 'disabled' : ''}>
           <span class="shop-emoji">${a.emoji}</span><span>${a.name}</span>
+          <span class="heat-pips">${heatPips(a.des)}</span>
           <span class="shop-cost">${locked ? `🔒 ♥ ${a.minAff}` : `🪙 ${a.cost} · ${a.hours}h`}</span>
         </button>`;
       }).join('')}
@@ -1164,6 +1178,7 @@ function openDates() {
       ${intimate.map(({ d, lock }) => `
         <button class="shop-item ${lock ? 'off' : 'intimate'}" data-intimate="${d.id}" ${lock ? 'disabled' : ''} title="${d.desc}">
           <span class="shop-emoji">${d.emoji}</span><span>${d.name}</span>
+          <span class="heat-pips">${heatPips(d.des)}</span>
           <span class="shop-cost">${lock || `🪙 ${d.hours}h`}</span>
         </button>`).join('')}
     </div>

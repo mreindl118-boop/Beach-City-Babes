@@ -448,3 +448,184 @@ h1.shimmer span { -webkit-text-fill-color: transparent; }
   object-fit: cover; border-radius: inherit;
   animation: art-fade 1.6s ease;
 }
+
+/* ==================================================================
+   MODERN OVERHAUL — "Neon Sunset": clearer gameplay, sexier surfaces
+   Appended last so these rules win over the base sheet.
+   ================================================================== */
+:root {
+  --pink: #ff4d8d;
+  --pink-d: #d62e6e;
+  --magenta: #ff2e9a;
+  --coral: #ff7a59;
+  --gold: #ffcf5c;
+  --violet: #a06bff;
+  --teal: #35d6c3;
+  --ink: #2a1622;
+  --glass: rgba(255,255,255,0.82);
+  --glass-brd: rgba(255,255,255,0.6);
+}
+
+/* deeper, richer sunset backdrop with a slow drift */
+body {
+  background: linear-gradient(200deg, #ff9a6b 0%, #ff5d8f 42%, #c33d86 74%, #6d2f7a 100%);
+  background-size: 100% 160%;
+  animation: bg-drift 24s ease-in-out infinite alternate;
+}
+@keyframes bg-drift { from { background-position: 0 0; } to { background-position: 0 100%; } }
+body.night { background: linear-gradient(200deg, #3a2a6b, #5b2f7a 55%, #241a44); }
+
+/* ---------- topbar: glass bar with pill readouts ---------- */
+#topbar {
+  background: rgba(30,14,28,0.42); backdrop-filter: blur(14px);
+  color: #fff; gap: 8px; padding: 9px 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.22);
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+#coins, #daytime, #hearts-won {
+  background: rgba(255,255,255,0.14); border-radius: 999px;
+  padding: 5px 11px; font-size: 13px; font-weight: 800; white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+}
+#coins { color: var(--gold); }
+.stats-strip {
+  background: rgba(255,255,255,0.14); color: #ffd9ec;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+}
+.iconbtn { color: #fff; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); font-size: 22px; }
+.iconbtn:active { transform: scale(0.9); }
+
+/* ---------- panels: glass + depth ---------- */
+#char-panel {
+  background: var(--glass); backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-brd);
+  box-shadow: 0 12px 34px rgba(60,10,40,0.28);
+}
+#chat-log {
+  background: rgba(255,255,255,0.62); backdrop-filter: blur(6px);
+  box-shadow: inset 0 2px 10px rgba(80,20,50,0.08);
+}
+
+.char-name { font-size: 22px; letter-spacing: 0.2px; }
+
+/* ---------- relationship tier track ---------- */
+.tier-track {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 2px; margin: 8px 0 4px;
+  background: rgba(255,255,255,0.5); border-radius: 14px; padding: 7px 8px;
+  box-shadow: inset 0 0 0 1px rgba(214,46,110,0.14);
+}
+.tier-step {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  flex: 1; opacity: 0.4; transition: all 0.3s ease;
+}
+.tier-step .ts-ico { font-size: 17px; filter: grayscale(0.8); transition: all 0.3s ease; }
+.tier-step .ts-lbl { font-size: 9.5px; font-weight: 800; color: #9a6b80; letter-spacing: 0.2px; }
+.tier-step.done { opacity: 0.85; }
+.tier-step.done .ts-ico { filter: grayscale(0); }
+.tier-step.now {
+  opacity: 1; transform: translateY(-1px);
+}
+.tier-step.now .ts-ico {
+  filter: none; font-size: 21px;
+  animation: tier-pulse 1.6s ease-in-out infinite;
+}
+.tier-step.now .ts-lbl { color: var(--pink-d); }
+@keyframes tier-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+.tier-arrow { color: #d9a7bb; font-weight: 900; font-size: 13px; }
+
+/* ---------- meters: labeled, glowing ---------- */
+.meters { margin: 10px 0 6px; }
+.meter {
+  display: grid; grid-template-columns: 1fr auto; align-items: center;
+  gap: 2px 8px; margin: 8px 0;
+}
+.mlabel {
+  grid-column: 1 / -1; font-size: 11.5px; font-weight: 800;
+  color: #8a5a70; letter-spacing: 0.3px; text-transform: uppercase;
+}
+.mlabel .mi { font-size: 13px; }
+.meter .bar {
+  height: 14px; background: rgba(214,46,110,0.12); border-radius: 999px;
+  box-shadow: inset 0 1px 3px rgba(120,20,60,0.18);
+}
+.meter .fill { box-shadow: 0 0 8px rgba(255,77,141,0.4); }
+.meter .fill.aff { background: linear-gradient(90deg, #ff9ec4, #ff2e9a); }
+.meter .fill.des { background: linear-gradient(90deg, #ffcf5c, #fb5607); }
+.meter .val { font-size: 15px; font-weight: 900; color: var(--pink-d); min-width: 28px; }
+
+/* ---------- action bar: category-coded, tactile, modern ---------- */
+#actions {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-top: 8px;
+}
+.btn.act {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 9px 4px; min-width: 0; border-radius: 16px; font-size: 12px; font-weight: 800;
+  color: #fff; border: 0; position: relative; overflow: hidden;
+  box-shadow: 0 4px 0 rgba(0,0,0,0.16), 0 6px 14px rgba(60,10,40,0.18);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.btn.act .ai { font-size: 21px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
+.btn.act .al { letter-spacing: 0.2px; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.btn.act:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.16); }
+.btn.act[data-cat="love"]  { background: linear-gradient(160deg, #ff6aa5, #ff2e7a); }
+.btn.act[data-cat="comm"]  { background: linear-gradient(160deg, #b98bff, #7a4fe0); }
+.btn.act[data-cat="coin"]  { background: linear-gradient(160deg, #ffd77a, #f0932b); color: #5a3800; }
+.btn.act[data-cat="coin"] .al { text-shadow: none; }
+.btn.act[data-cat="world"] { background: linear-gradient(160deg, #4fe0cf, #16b7a5); color: #063f39; }
+.btn.act[data-cat="world"] .al { text-shadow: none; }
+.btn.act[data-cat="rest"]  { background: linear-gradient(160deg, #9aa0c0, #6c7196); }
+
+/* ---------- send button + input ---------- */
+#chat-bar { gap: 8px; }
+#chat-input {
+  border: 2px solid rgba(214,46,110,0.35); border-radius: 999px;
+  padding: 11px 16px; font-size: 15px; background: rgba(255,255,255,0.9);
+}
+#chat-input:focus { outline: none; border-color: var(--magenta); box-shadow: 0 0 0 4px rgba(255,46,154,0.15); }
+#chat-send { border-radius: 999px; background: linear-gradient(160deg, #ff5d9c, #ff2e7a); box-shadow: 0 4px 0 var(--pink-d); }
+#chat-send:active { transform: translateY(3px); box-shadow: none; }
+
+/* ---------- shop / date cards: hotter ---------- */
+.shop-item {
+  border: 2px solid rgba(214,46,110,0.18); border-radius: 18px; padding: 12px 6px;
+  box-shadow: 0 4px 12px rgba(80,20,50,0.08); transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.shop-item:not(.off):hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(255,46,122,0.22); }
+.shop-item .shop-emoji { font-size: 30px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.12)); }
+.shop-item.intimate {
+  border-color: rgba(255,46,122,0.55);
+  background: linear-gradient(165deg, #fff, #ffeaf3);
+  box-shadow: 0 4px 16px rgba(255,46,122,0.22);
+}
+.shop-item.intimate .shop-emoji { animation: intimate-glow 2.2s ease-in-out infinite; }
+@keyframes intimate-glow { 0%,100% { filter: drop-shadow(0 0 2px rgba(255,46,122,0.4)); } 50% { filter: drop-shadow(0 0 10px rgba(255,46,122,0.85)); } }
+
+/* heat pips on a date card */
+.heat-pips { font-size: 11px; letter-spacing: -1px; }
+
+/* ---------- finale invite: bigger, hotter ---------- */
+.btn.finale {
+  background: linear-gradient(90deg, #ff2e9a, #ff7a2e, #ff2e9a);
+  background-size: 200% 100%; animation: finale-sheen 3s linear infinite, pulse 1.4s infinite;
+  border-radius: 16px; font-size: 15px; letter-spacing: 0.3px;
+  box-shadow: 0 6px 20px rgba(255,46,154,0.5);
+}
+@keyframes finale-sheen { from { background-position: 0 0; } to { background-position: 200% 0; } }
+
+/* ---------- modal: glass card ---------- */
+#modal { background: rgba(30,8,22,0.62); backdrop-filter: blur(4px); }
+#modal-body {
+  background: rgba(255,255,255,0.96); border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.7);
+  box-shadow: 0 24px 60px rgba(40,5,30,0.4);
+}
+#modal-body h3 { font-size: 19px; }
+
+@media (max-width: 760px) {
+  #actions { grid-template-columns: repeat(3, 1fr); }
+  .tier-track { padding: 6px 4px; }
+  .tier-step .ts-lbl { font-size: 8.5px; }
+}
+.heat-pips { font-size: 10px; letter-spacing: -2px; line-height: 1; }
+.heat-pips .pip-dim { filter: grayscale(1); opacity: 0.28; }

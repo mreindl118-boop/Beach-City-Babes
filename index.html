@@ -122,9 +122,16 @@
         <div id="portrait-box"></div>
         <div id="char-name" class="char-name"></div>
         <div id="char-chips" class="chips"></div>
+        <div id="tier-track" class="tier-track"></div>
         <div class="meters">
-          <div class="meter" id="meter-aff"><span class="ico">♥</span><div class="bar"><div class="fill aff"></div></div><span class="val">0</span></div>
-          <div class="meter" id="meter-des"><span class="ico">🔥</span><div class="bar"><div class="fill des"></div></div><span class="val">0</span></div>
+          <div class="meter" id="meter-aff">
+            <span class="mlabel"><span class="mi">♥</span> Affection</span>
+            <div class="bar"><div class="fill aff"></div></div><span class="val">0</span>
+          </div>
+          <div class="meter" id="meter-des">
+            <span class="mlabel"><span class="mi">🔥</span> Desire</span>
+            <div class="bar"><div class="fill des"></div></div><span class="val">0</span>
+          </div>
           <div class="mood">mood <span id="mood-emoji">😐</span> <span id="spark" class="spark"></span></div>
         </div>
         <div id="profile"></div>
@@ -141,15 +148,15 @@
           <button id="chat-send" type="submit" class="btn primary">Send</button>
         </form>
         <nav id="actions">
-          <button class="btn act" data-action="gift">🎁 Gift</button>
-          <button class="btn act" data-action="date">🌴 Date</button>
-          <button class="btn act" data-action="phone">📱 Phone</button>
-          <button class="btn act" data-action="hustle">💼 Hustle</button>
-          <button class="btn act" data-action="items">🎒 Items</button>
-          <button class="btn act" data-action="here">📍 Here</button>
-          <button class="btn act" data-action="sleep">😴 Sleep</button>
-          <button class="btn act" data-action="travel">🗺️ Travel</button>
-          <button class="btn act" data-action="roster">💞 People</button>
+          <button class="btn act" data-action="gift" data-cat="love"><span class="ai">🎁</span><span class="al">Gift</span></button>
+          <button class="btn act" data-action="date" data-cat="love"><span class="ai">💋</span><span class="al">Date</span></button>
+          <button class="btn act" data-action="phone" data-cat="comm"><span class="ai">📱</span><span class="al">Phone</span></button>
+          <button class="btn act" data-action="roster" data-cat="comm"><span class="ai">💞</span><span class="al">People</span></button>
+          <button class="btn act" data-action="hustle" data-cat="coin"><span class="ai">💼</span><span class="al">Hustle</span></button>
+          <button class="btn act" data-action="items" data-cat="coin"><span class="ai">🎒</span><span class="al">Items</span></button>
+          <button class="btn act" data-action="here" data-cat="world"><span class="ai">📍</span><span class="al">Here</span></button>
+          <button class="btn act" data-action="travel" data-cat="world"><span class="ai">🗺️</span><span class="al">Travel</span></button>
+          <button class="btn act" data-action="sleep" data-cat="rest"><span class="ai">😴</span><span class="al">Sleep</span></button>
         </nav>
       </div>
     </main>
