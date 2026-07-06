@@ -240,13 +240,15 @@ export function dailyTick(c, day, rng, player) {
   const arch = archetypeOf(c);
   const daysIgnored = day - c.lastSeenDay;
   let neglected = false;
-  if (daysIgnored >= arch.patience && !c.partner) {
-    c.affection = Math.max(0, c.affection - rng.int(2, 5));
-    c.mood = Math.max(-2, c.mood - 1);
-    neglected = true;
-  } else if (c.mood < 0 && rng.chance(0.5)) {
-    c.mood += 1; // moods heal with time
+  // Being apart makes hearts WANE, not shatter: affection drifts down gently
+  // (never below a floor of what you built), moods still heal, and nobody
+  // holds a grudge for a busy week — they just start wanting to see you.
+  if (daysIgnored >= 2 && !c.partner) {
+    const floor = Math.min(c.affection, 12); // early spark never fully fades
+    c.affection = Math.max(floor, c.affection - 1);
+    if (daysIgnored >= arch.patience) neglected = true; // they miss you — expect an invite
   }
+  if (c.mood < 0 && rng.chance(0.5)) c.mood += 1; // moods heal with time
   if (!c.currentDesire || rng.chance(0.4)) rollDesire(c, rng);
   clampStats(c, player);
   return neglected;

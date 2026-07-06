@@ -55,7 +55,7 @@ const ROLE_STATS = {
 
 function newState(playerDef, slot) {
   const usedNames = new Set([playerDef.name]);
-  const npcs = [generateCharacter(rng, usedNames), generateCharacter(rng, usedNames), generateCharacter(rng, usedNames)];
+  const npcs = Array.from({ length: 6 }, () => generateCharacter(rng, usedNames));
   npcs.forEach(c => rollDesire(c, rng));
   const worldSeed = rng.int(1, 1_000_000_000);
   npcs.forEach(c => ensureSchedule(c, worldSeed));
@@ -123,6 +123,18 @@ function migrate(data) {
   p.condoms ??= 0;
   p.std ??= null;
   p.stdKnown ??= false;
+  p.tired ??= false;
+  // the town grew: old saves meet the new faces too
+  if ((data.npcs?.length ?? 0) < 6) {
+    const used = new Set([...(data.usedNames || []), p.name]);
+    const topUp = new RNG(data.worldSeed + data.npcs.length * 977);
+    while (data.npcs.length < 6) {
+      const nc = generateCharacter(topUp, used);
+      rollDesire(nc, topUp);
+      data.npcs.push(nc);
+    }
+    data.usedNames = [...used];
+  }
   for (const c of data.npcs ?? []) ensureSchedule(c, data.worldSeed);
   return data;
 }
@@ -148,8 +160,16 @@ function loadSlot(n) {
 const active = () => S.npcs.find(c => c.id === S.activeId);
 const roleData = () => ROLES.find(r => r.id === S.player.role);
 
+// Live stats after temporary conditions. Exhaustion (no sleep past midnight)
+// shaves 2 off everything until you sleep — a debuff, never permanent.
+function effStats() {
+  const st = { ...S.player.stats };
+  if (S.player.tired) for (const k in st) st[k] = Math.max(0, st[k] - 2);
+  return st;
+}
+
 function playerForDialogue() {
-  return { ...S.player, roleLabel: roleData().label, roleData: roleData() };
+  return { ...S.player, stats: effStats(), tired: !!S.player.tired, roleLabel: roleData().label, roleData: roleData() };
 }
 
 // ---------------- screens ----------------
@@ -276,13 +296,15 @@ function renderTopbar() {
   const ph = phaseInfo(phaseOf(S.player.hour));
   const loc = locationById(S.player.location) || LOCATIONS[0];
   $('#coins').textContent = `🪙 ${S.player.coins}`;
-  $('#daytime').textContent = `${ph.emoji} ${ph.label} · Day ${S.player.day}`;
+  const heat = ({ evening: ' · 🔥', night: ' · 🔥🔥', late: ' · 🔥🥱' })[ph.id] || '';
+  $('#daytime').textContent = `${ph.emoji} ${ph.label} · Day ${S.player.day}${heat}`;
   $('#hearts-won').textContent = `${loc.emoji} ${loc.name}`;
   // tint the world by time of day
   document.documentElement.style.setProperty('--phase-tint', ph.tint);
   document.body.classList.toggle('night', isNightPhase(ph.id));
-  const st = S.player.stats;
+  const st = effStats();
   const buffIcons = [
+    S.player.tired ? '\u{1F635}\u{200D}\u{1F4AB}' : '',
     S.player.buffs.courage > 0 ? '🥃' : '',
     S.player.buffs.scent ? '🌺' : '',
     S.player.buffs.outfit ? '🕶️' : '',
@@ -368,6 +390,29 @@ function portraitLook(c, tier, heat) {
   return { ctx, key: `${c.id}:${heat}:${ctx.emotion}:${ctx.locationId}:${ctx.phase}` };
 }
 
+// A selfie for picture texting: the same art pipeline, framed as a phone
+// selfie, set wherever THAT character is right now (not where the player is).
+// Falls back to their sticker portrait as the 'photo' when offline.
+async function npcSelfie(c) {
+  const tier = tierFor(c);
+  const heat = heatLevel(c, tier);
+  const there = npcLocation(c, curPhase(), S.worldSeed);
+  const ctx = { emotion: emotionFor(c, tier), locationId: there, phase: curPhase() };
+  const key = `selfie:${c.id}:${heat}:${ctx.emotion}:${there}:${ctx.phase}`;
+  window.BCB_PORTRAIT_CACHE ??= {};
+  if (window.BCB_PORTRAIT_CACHE[key]) return window.BCB_PORTRAIT_CACHE[key];
+  const prov = window.BCB_PORTRAIT_PROVIDER;
+  if (typeof prov === 'function') {
+    try {
+      const prompt = describeCharacter(c, tier, ctx)
+        + ', casual phone selfie taken at arm\u2019s length, playful candid energy, vertical composition';
+      const url = await prov(prompt, c, heat);
+      if (url) { window.BCB_PORTRAIT_CACHE[key] = url; return url; }
+    } catch { /* fall through to sticker */ }
+  }
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(portraitSVG(c, `selfie${uidCounter++}`, tier));
+}
+
 function renderPortrait(c, tier, heat, look = portraitLook(c, tier, heat)) {
   const key = look.key;
   window.BCB_PORTRAIT_CACHE ??= {};
@@ -401,8 +446,8 @@ function renderPortrait(c, tier, heat, look = portraitLook(c, tier, heat)) {
 // Always log to an EXPLICIT npc id: generative replies arrive after a network
 // round-trip, and by then the player may be in a different conversation — the
 // words must land in the log of whoever said them, never whoever is on screen.
-function logTo(npcId, who, text) {
-  (S.logs[npcId] ??= []).push({ who, text });
+function logTo(npcId, who, text, extra = {}) {
+  (S.logs[npcId] ??= []).push({ who, text, ...extra });
   if (S.logs[npcId].length > 60) S.logs[npcId].shift();
   if (S.activeId === npcId) renderLog();
 }
@@ -414,10 +459,17 @@ const log = (who, text) => logTo(active().id, who, text);
 const escapeHtml = s => String(s).replace(/[&<>"']/g,
   ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
+const SAFE_PIC = src => typeof src === 'string'
+  && (/^data:image\/(png|jpe?g|webp|svg\+xml)[;,]/.test(src) || src.startsWith('https://image.pollinations.ai/'));
+
 function renderLog() {
   const el = $('#chat-log');
   const entries = S.logs[active().id] ?? [];
-  el.innerHTML = entries.map(e => `<div class="bubble ${e.who}">${escapeHtml(e.text)}</div>`).join('');
+  el.innerHTML = entries.map(e => {
+    const pic = SAFE_PIC(e.img)
+      ? `<img class="chat-pic" alt="picture message" src="${e.img.replace(/"/g, '&quot;')}">` : '';
+    return `<div class="bubble ${e.who}${pic ? ' pic' : ''}">${pic}${escapeHtml(e.text)}</div>`;
+  }).join('');
   el.scrollTop = el.scrollHeight;
 }
 
@@ -432,9 +484,15 @@ function renderActions() {
 // ---------------- actions ----------------
 // The flow: positive arousal beats chain into a spark combo (×1.25 per link,
 // max ×1.75); a flop breaks the chain. Scent buff amplifies everything.
+// The clock is a mechanic: desire beats land hotter after dark and cooler in
+// the fresh light of morning. (Affection is time-of-day agnostic — hearts
+// don't check watches, libidos do.)
+const PHASE_DESIRE = { dawn: 0.8, morning: 0.9, afternoon: 1, evening: 1.15, night: 1.3, late: 1.2 };
+
 function applyDelta(c, dAff, dDes) {
   c.affection += dAff;
   if (dDes > 0) {
+    dDes = dDes * (PHASE_DESIRE[phaseOf(S.player.hour)] ?? 1);
     if (S.player.buffs.scent) dDes = Math.round(dDes * 1.5);
     c.spark = Math.min(3, (c.spark ?? 0) + 1);
     c.desire += Math.round(dDes * (1 + 0.25 * (c.spark - 1)));
@@ -660,7 +718,7 @@ function arrive(loc, announce) {
   const here = presentNPCs();
   // small chance to meet someone brand new while you're out and about
   let met = null;
-  if (!loc.home && !loc.clinic && S.npcs.length < 8 && rng.chance(loc.adult ? 0.15 : 0.3)) {
+  if (!loc.home && !loc.clinic && S.npcs.length < 14 && rng.chance(loc.adult ? 0.15 : 0.3)) {
     const used = new Set(S.usedNames);
     met = generateCharacter(rng, used);
     S.usedNames = [...used];
@@ -720,19 +778,41 @@ let awaitingReply = false;
 // Contextual chip row above the input: who else is here to approach, plus
 // Heart-to-heart / Come clean. Input is gated by whether you're actually with
 // someone — you can't chat with people who aren't at your location.
+const textsLeft = c => TEXTS_PER_NPC_PER_DAY - (S.player.textsSent[c.id] ?? 0);
+
 function refreshChatBar() {
   const c = active();
   const input = $('#chat-input');
   const here = presentNPCs();
   const withThem = isPresent(c);
-  input.disabled = awaitingReply || (!withThem && !activeScene);
+  const texting = !withThem && !activeScene; // apart = the phone comes out
+  const canText = texting && textsLeft(c) > 0;
+  input.disabled = awaitingReply || (texting && !canText);
   input.placeholder = activeScene ? 'Type your answer, or tap a choice above…'
     : awaitingReply ? '…'
     : withThem ? `Say something to ${c.name}…`
-    : here.length ? 'Tap someone below to talk to them.'
-    : 'Nobody here — 🗺️ Travel to find people.';
+    : canText ? `📱 Text ${c.name}… (${textsLeft(c)} left today)`
+    : `📱 You've texted ${c.name} enough for one day.`;
+
+  // the banner + bubble style make it unmistakable: phone vs face-to-face
+  const banner = $('#chat-banner');
+  if (banner) {
+    const loc = locationById(S.player.location);
+    if (withThem) {
+      banner.textContent = `💬 With ${c.name} · ${loc ? loc.emoji + ' ' + loc.name : ''}`;
+      banner.className = 'inperson';
+    } else {
+      const thereLoc = locationById(npcLocation(c, curPhase(), S.worldSeed));
+      banner.textContent = `📱 Texting ${c.name} — ${pronounsOf(c).sub === 'they' ? 'they\u2019re' : pronounsOf(c).sub + '\u2019s'} at ${thereLoc ? thereLoc.emoji + ' ' + thereLoc.name : 'somewhere in town'}`;
+      banner.className = 'texting';
+    }
+  }
+  $('#chat-log').classList.toggle('texting', texting);
 
   const chips = [];
+  // picture texting: ask for a pic once you're at least flirting
+  if (texting && textsLeft(c) > 0 && tierFor(c) >= 1)
+    chips.push(`<button class="chip mini action" data-chip="pic" ${awaitingReply ? 'disabled' : ''}>📸 Ask for a pic</button>`);
   // approach anyone else present — but not while a reply is in flight, so a
   // pending generative reply can't be cross-wired into another conversation
   for (const o of here) if (o.id !== c.id)
@@ -748,7 +828,8 @@ function refreshChatBar() {
   bar.innerHTML = chips.join('');
   bar.querySelectorAll('[data-approach]').forEach(b => b.onclick = () => switchTo(b.dataset.approach));
   bar.querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
-    if (b.dataset.chip === 'dtr') { playerSay('Hey… can we talk about us?'); setTimeout(() => sceneDTR(c, false), 420); }
+    if (b.dataset.chip === 'pic') askForPic(c);
+    else if (b.dataset.chip === 'dtr') { playerSay('Hey… can we talk about us?'); setTimeout(() => sceneDTR(c, false), 420); }
     else { playerSay('There’s something I need to tell you.'); setTimeout(() => sceneConfront(c, true), 420); }
   });
 }
@@ -766,6 +847,15 @@ function sendTyped() {
     playerSay(text);
     if (id) { const h = activeScene.handler; activeScene = null; h(id); }
     else setTimeout(() => { npcSay(rng.pick(['That’s not really an answer, {n}. Which is it?'.replace('{n}', S.player.name), 'I need a straight answer here.'])); refreshChatBar(); }, 350);
+    return;
+  }
+
+  // apart = the phone: typed messages become texts (with the daily limit)
+  if (!isPresent(c)) {
+    if (textsLeft(c) <= 0) { toast(`No more texts to ${c.name} today.`); return; }
+    S.player.textsSent[c.id] = (S.player.textsSent[c.id] ?? 0) + 1;
+    playerSay(`📱 ${text}`);
+    npcReply(c, text, { texting: true });
     return;
   }
 
@@ -790,7 +880,7 @@ function sendTyped() {
 // is guarded: S0 catches slot swaps (quit-to-title → load another save) and
 // replySeq stops a stale completion from unlocking a newer request's chat bar.
 let replySeq = 0;
-async function npcReply(c, text) {
+async function npcReply(c, text, { texting = false } = {}) {
   const S0 = S;
   const seq = ++replySeq;
   awaitingReply = true;
@@ -810,8 +900,10 @@ async function npcReply(c, text) {
         phase: phaseOf(S.player.hour),
         day: S.player.day,
       };
-      const out = await prov(text, chatPersona(c, pl, recent, world), { tier: tierFor(c) });
-      if (out && typeof out === 'string') r.npcText = out.trim();
+      const persona = chatPersona(c, pl, recent, world);
+      if (texting) persona.channel = 'text';
+      const out = await prov(texting ? `📱 ${text}` : text, persona, { tier: tierFor(c) });
+      if (out && typeof out === 'string') r.npcText = out.trim().replace(/^📱\s*/, '');
     } catch { /* fall back to procedural r.npcText */ }
   } else {
     r = resolveTyped(c, pl, text, rng, roleData());
@@ -819,6 +911,7 @@ async function npcReply(c, text) {
 
   if (S !== S0) return; // save slot changed mid-flight — this reply belongs to a dead world
 
+  if (texting) r.dDes = Math.round(r.dDes * 0.6); // sparks fly hotter in person
   applyDelta(c, r.dAff, r.dDes);
   if (S.player.buffs.courage > 0) S.player.buffs.courage -= 1;
   const intent = r.nlu?.intent;
@@ -832,7 +925,7 @@ async function npcReply(c, text) {
 
   setTimeout(() => {
     if (S !== S0) return;
-    logTo(c.id, 'npc', r.npcText); // pinned to the speaker, not to active()
+    logTo(c.id, 'npc', texting ? `📱 ${r.npcText}` : r.npcText); // pinned to the speaker, not to active()
     save();
     const stillHere = S.activeId === c.id;
     if (r.special === 'transShare' && stillHere) {
@@ -842,6 +935,46 @@ async function npcReply(c, text) {
     if (stillHere) afterAction(r.emotion, r.success);
     refreshChatBar();
   }, 420);
+}
+
+// 📸 picture texting: ask and you might receive — desire, boldness, and tier
+// decide. A yes costs a text slot and comes back as a real picture message.
+async function askForPic(c) {
+  if (textsLeft(c) <= 0) { toast(`No more texts to ${c.name} today.`); return; }
+  const S0 = S;
+  S.player.textsSent[c.id] = (S.player.textsSent[c.id] ?? 0) + 1;
+  playerSay('📱 Send me a pic? 😏');
+  const tier = tierFor(c);
+  const p = Math.min(0.9, 0.25 + 0.18 * tier + c.desire / 220 + c.boldness * 0.2);
+  if (!rng.chance(p)) {
+    applyDelta(c, -1, 0);
+    setTimeout(() => {
+      if (S !== S0) return;
+      logTo(c.id, 'npc', `📱 ${rng.pick([
+        'Ha! Earn it first, cutie. 😏',
+        'Hmm. Not yet. Take me somewhere nice and we\u2019ll talk. 😘',
+        'Bold of you. I like it — but no. 💅',
+      ])}`);
+      save(); refreshChatBar();
+    }, 700);
+    return;
+  }
+  const caption = rng.pick([
+    'Just for you. Don\u2019t share it. 😘',
+    'Since you asked so nicely… 😏',
+    'Thinking of you anyway. 💋',
+    'Quick — before I change my mind. 🙈',
+  ]);
+  const img = await npcSelfie(c);
+  if (S !== S0) return;
+  applyDelta(c, 2, 5);
+  setTimeout(() => {
+    if (S !== S0) return;
+    logTo(c.id, 'npc', `📱 ${caption}`, { img });
+    save();
+    if (S.activeId === c.id) afterAction(emotionFor(c, tierFor(c)), true);
+    refreshChatBar();
+  }, 600);
 }
 
 function openReplyScene(replies, c) {
@@ -1147,7 +1280,7 @@ function openClinic() {
 }
 
 function openHustle() {
-  const st = S.player.stats;
+  const st = effStats();
   const body = `
     <h3>💼 Hustle & Glow-up</h3>
     <p class="modal-text">Stats: 💬 Charm ${st.charm} · ✨ Style ${st.style} · 💪 Physique ${st.physique} · 🔥 Mojo ${S.player.mojo}</p>
@@ -1335,9 +1468,18 @@ async function sendText(c, kind) {
   }, 600);
 }
 
+// Missing someone reads as an invitation, not a guilt trip: they tell you
+// where they'll be so the reunion is one travel-tap away.
+function inviteText(c) {
+  const ph = rng.pick(['afternoon', 'evening']);
+  const loc = locationById(npcLocation(c, ph, S.worldSeed));
+  return `Hey stranger… I miss your face. I'll be at ${loc ? loc.name : 'the beach'} ${ph === 'afternoon' ? 'this afternoon' : 'tonight'} — come see me? ${loc ? loc.emoji : '🏖️'}💕`;
+}
+
 function doSleep() {
   S.player.day += 1;
   S.player.hour = 9;
+  if (S.player.tired) { S.player.tired = false; narrate('\u2600\uFE0F A real night\u2019s sleep. You feel human again.'); }
   const pl = playerForDialogue();
   const dated = S.npcs.filter(c => c._datedToday).map(c => c.id);
   for (const c of S.npcs) {
@@ -1360,7 +1502,19 @@ function doSleep() {
     // proactive texting
     let kind = null;
     if (c.partner && rng.chance(0.5)) kind = 'partner';
-    else if (neglected && rng.chance(0.8)) kind = 'miss';
+    else if (neglected && rng.chance(0.85)) {
+      // they miss you → a warm 'come see me' with a real time and place
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day, text: inviteText(c) });
+    }
+    else if (tier >= 1 && c.desire >= 50 && rng.chance(0.25)) {
+      // feeling themselves → a surprise selfie lands in your phone
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day, pic: true,
+        text: rng.pick(['Took this for you just now. 😏', 'The light was too good not to. 🙈', 'Don\u2019t leave me on read. 😘']) });
+    }
+    else if ((S.logs[c.id]?.length) && rng.chance(0.15)) {
+      // people you've met want to see you again, full stop
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day, text: inviteText(c) });
+    }
     else if (tier >= 1 && dated.length && !dated.includes(c.id) && rng.chance(0.3)) {
       // jealousy depends on wiring: open agreements get playful check-ins instead
       kind = c.agreement === 'open' ? 'checkin' : c.relStyle === 'poly' && tier < 2 ? 'flirt' : 'jealous';
@@ -1396,7 +1550,14 @@ function doSleep() {
 
 function advanceTime(h) {
   S.player.hour += h;
-  if (S.player.hour >= 24) S.player.hour = 23; // last actions squeeze into the night
+  if (S.player.hour >= 28) S.player.hour = 28; // 4am — the town truly stops
+  // burning the midnight oil has a price: past midnight you're running on
+  // fumes — a temporary debuff (stats, charm rolls) until you sleep it off
+  if (S.player.hour >= 24 && !S.player.tired) {
+    S.player.tired = true;
+    narrate('🥱 It’s past midnight and it shows. Everything’s a little harder until you get some sleep.');
+    toast('😵‍💫 Exhausted — stats down until you sleep.');
+  }
   // the ebb: passing hours cool everyone toward their baseline simmer
   for (const c of S.npcs) ebbDesire(c, h, rng);
   renderTopbar();
@@ -1438,7 +1599,14 @@ function switchTo(id) {
   const mine = S.texts.filter(t => t.npcId === id && !t.read);
   const here = isPresent(c);
   if (mine.length) {
-    mine.forEach(t => { t.read = true; log('npc', `📱 ${t.text}`); });
+    const S0 = S;
+    mine.forEach(t => {
+      t.read = true;
+      logTo(id, 'npc', `📱 ${t.text}`);
+      if (t.pic) npcSelfie(c).then(img => {
+        if (S === S0) { logTo(id, 'npc', '📱 📸', { img }); save(); }
+      });
+    });
   } else if (here && !(S.logs[id]?.length)) {
     npcSay(greeting(c, playerForDialogue(), rng));
   } else if (!here) {
@@ -1636,6 +1804,8 @@ function personaSystemPrompt(persona) {
       : 'You are NOT romantically interested — keep it warmly friendly and deflect flirting kindly.',
     persona.desireHint ? `Something you currently want (drop hints, don't demand): "${persona.desireHint}"` : '',
     persona.turnoffs?.length ? `Instant turn-offs for you: ${persona.turnoffs.join(', ')}.` : '',
+    persona.playerTired ? `${persona.playerName} looks visibly exhausted right now — sleep-deprived. You notice, and it colors your reaction (tease them, worry about them, or find it a little less attractive — your call).` : '',
+    ['evening', 'night', 'late'].includes(w.phase) ? 'It\'s after dark and the whole town runs bolder — flirtation lands easier at this hour.' : '',
     persona.boldness >= 0.7 ? 'You are bold — you tease first and escalate when it feels right.'
       : persona.boldness <= 0.35 ? 'You warm up slowly — you make people earn your spark.' : '',
     'CONVERSATION RULES — this is what makes you feel real:',

@@ -10,7 +10,12 @@ const errors = [];
   const b = await chromium.launch({ executablePath });
   const page = await b.newPage({ viewport: { width: 1100, height: 800 }, serviceWorkers: 'block' });
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  await page.route('https://image.pollinations.ai/**', route => route.abort());
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const imgPrompts = [];
+  await page.route('https://image.pollinations.ai/**', route => {
+    imgPrompts.push(decodeURIComponent(route.request().url()));
+    route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
+  });
 
   const calls = [];
   let slowNext = false; // when set, delay the next reply to widen the race window
@@ -31,7 +36,7 @@ const errors = [];
   await page.fill('#cc-name', 'Ava');
   await page.click('[data-r="artist"]');
   await page.click('#cc-go');
-  await page.waitForSelector('#portrait-box svg.portrait');
+  await page.waitForSelector('#portrait-box svg.portrait, #portrait-box img.portrait-ext');
   await page.waitForTimeout(300);
 
   // 1. typed chat, ZERO configuration → generative reply
@@ -76,9 +81,79 @@ const errors = [];
   if (!logT.includes('free generated reply')) errors.push('phone reply not generative; log=' + logT.slice(-200));
   await page.screenshot({ path: `${SHOT}/chat-free.png` });
 
+  // 4b. TEXTING MODE: send the active NPC across town — chat flips to SMS mode
+  // with a banner, typed messages become texts, replies come back with 📱
+  const farId = await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    const a = raw.npcs.find(n => n.id === raw.activeId);
+    a.schedule = {};
+    ['dawn', 'morning', 'afternoon', 'evening', 'night', 'late'].forEach(ph => a.schedule[ph] = 'club');
+    raw.player.location = 'beach'; raw.player.hour = 10;
+    raw.player.textsSent = {};
+    a.affection = 40; a.desire = 90; a.boldness = 1; // tier 1+, eager → pic chip shows
+    localStorage.setItem('bcb_slot_1', JSON.stringify(raw));
+    return a.id;
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('[data-load="1"]');
+  await page.waitForTimeout(600);
+  // the game focuses whoever is PRESENT on load — deliberately switch to the
+  // faraway one via the roster to enter texting mode
+  await page.click('[data-action="roster"]');
+  await page.waitForSelector('[data-npc]');
+  await page.click(`[data-npc="${farId}"]`);
+  await page.waitForTimeout(500);
+  const bannerCls = await page.$eval('#chat-banner', el => el.className).catch(() => '');
+  if (bannerCls !== 'texting') errors.push('texting banner not active when apart, class=' + bannerCls);
+  const ph = await page.$eval('#chat-input', el => el.placeholder);
+  if (!ph.includes('📱')) errors.push('texting placeholder missing: ' + ph);
+  await page.fill('#chat-input', 'wish you were here with me');
+  await page.click('#chat-send');
+  await page.waitForTimeout(1300);
+  const logX = await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return (raw.logs[raw.activeId] || []).map(e => e.text).join('|');
+  });
+  if (!logX.includes('📱 wish you were here')) errors.push('typed message while apart not sent as text');
+  if (!logX.includes('📱 Mmm, a free generated reply')) errors.push('texted reply missing 📱 prefix: ' + logX.slice(-200));
+
+  // 4c. PICTURE TEXTING: the 📸 chip requests a selfie; the selfie prompt goes
+  // through the art pipeline and an <img> picture message lands in the thread
+  const picChip = await page.$('[data-chip="pic"]');
+  if (!picChip) errors.push('📸 Ask-for-a-pic chip missing in texting mode');
+  else {
+    const nImg = imgPrompts.length;
+    await picChip.click();
+    await page.waitForTimeout(1500);
+    const gotPic = await page.$('#chat-log .bubble.pic img.chat-pic');
+    const refusal = await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+      return /Earn it|Not yet|Bold of you/.test((raw.logs[raw.activeId] || []).map(e => e.text).join('|'));
+    });
+    if (!gotPic && !refusal) errors.push('pic request produced neither a picture message nor a refusal');
+    if (gotPic) {
+      const selfiePrompt = imgPrompts.slice(nImg).find(u => u.includes('phone selfie'));
+      if (!selfiePrompt) errors.push('selfie generation did not use a selfie-framed prompt');
+    }
+    await page.screenshot({ path: `${SHOT}/chat-picture.png` });
+  }
+
   // 5. RACE REGRESSION: reply must land in the SENDER's log even if the player
   // switches to another NPC while the request is in flight (via roster — the
   // approach chips are disabled during awaitingReply by design).
+  // bring the far NPC back in person (and reset text limits) for the race test
+  await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    const a = raw.npcs.find(n => n.id === raw.activeId);
+    a.schedule = {};
+    ['dawn', 'morning', 'afternoon', 'evening', 'night', 'late'].forEach(ph => a.schedule[ph] = 'beach');
+    raw.player.location = 'beach'; raw.player.hour = 10;
+    raw.player.textsSent = {};
+    localStorage.setItem('bcb_slot_1', JSON.stringify(raw));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('[data-load="1"]');
+  await page.waitForTimeout(500);
   const senderId = await page.evaluate(() => JSON.parse(localStorage.getItem('bcb_slot_1')).activeId);
   slowNext = true;
   await page.fill('#chat-input', 'tell me a secret');
@@ -100,5 +175,5 @@ const errors = [];
 
   await b.close();
   if (errors.length) { console.log('FREE-CHAT ERRORS:\n' + errors.join('\n')); process.exit(1); }
-  console.log('FREE-CHAT E2E PASS — zero-config generative replies, persona+world prompt, history continuity, stats driven, phone texts generative, race-safe routing');
+  console.log('FREE-CHAT E2E PASS — zero-config generative replies, continuity, stats, texting mode + banner, picture texting, race-safe routing');
 })().catch(e => { console.error('FATAL', e.message); process.exit(1); });

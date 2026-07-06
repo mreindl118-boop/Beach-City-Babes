@@ -357,3 +357,30 @@ body.night .iconbtn { color: #ffe9f1; }
   20% { opacity: 1; transform: translateY(-4px) scale(1.1); }
   100% { opacity: 0; transform: translateY(-34px) scale(1); }
 }
+
+/* ---------- texting vs in-person: unmistakable modes ---------- */
+#chat-banner {
+  padding: 6px 12px; border-radius: 10px; margin-bottom: 6px;
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.01em;
+}
+#chat-banner.inperson { background: #ffe3ee; color: #a83a5c; }
+#chat-banner.texting {
+  background: #1b2a3a; color: #9fd0ff;
+  box-shadow: inset 0 0 0 2px #2d4258;
+}
+#chat-log.texting {
+  background:
+    radial-gradient(circle at 15% 10%, rgba(120,180,255,0.08), transparent 40%),
+    #0e1620;
+  border-radius: 14px;
+}
+#chat-log.texting .bubble.npc { background: #223140; color: #e8f2ff; border-color: #34506b; }
+#chat-log.texting .bubble.me  { background: #1f7a4d; color: #eafff3; border-color: #2ba368; }
+#chat-log.texting .bubble.sys { opacity: 0.75; }
+
+/* picture messages */
+.bubble.pic { padding: 6px; max-width: 62%; }
+.chat-pic {
+  display: block; width: 100%; max-width: 220px; border-radius: 12px;
+  margin-bottom: 4px; box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+}

@@ -10,6 +10,7 @@ import {
   currentDesireOf, addMemory, clampStats,
 } from './characters.js';
 import { classify, topicLabel } from './nlu.js';
+import { phaseOf } from './world.js';
 
 // ---------- template filling ----------
 export function fill(tpl, ctx) {
@@ -321,7 +322,10 @@ export function resolveMove(c, player, move, rng, roleData, opts = {}) {
 
   // ----- boundaries first: some moves are just WRONG right now -----
   // Spicy talk before they're comfortable reads as creepy, not confident.
-  const spiceGate = (0.35 + 0.65 * (c.patienceForSpice ?? 0.5)) * (tier + (c.desire / 60));
+  // the clock matters: after dark everyone's braver about spicy talk; in the
+  // fresh morning light the same line reads thirstier than it did at midnight
+  const nightBold = ({ evening: 0.15, night: 0.3, late: 0.25, dawn: -0.1, morning: -0.1 })[phaseOf(player.hour ?? 12)] || 0;
+  const spiceGate = (0.35 + 0.65 * Math.max(0, Math.min(1, (c.patienceForSpice ?? 0.5) + nightBold))) * (tier + (c.desire / 60));
   if (move === 'SPICY' && spiceGate < 1.0) {
     c.warnings = (c.warnings ?? 0) + 1;
     c.mood = Math.max(-2, c.mood - 1);
@@ -1121,6 +1125,7 @@ export function chatPersona(c, player, recentLog, world = {}) {
     turnoffs: c.turnoffs,
     boldness: c.boldness, libido: c.libido,
     affection: c.affection, desire: c.desire,
+    playerTired: !!player.tired,
     world, // { location, phase, day } — where this conversation is happening
     recent: recentLog,
     style: 'Reply in first person as this character. Flirty, witty, with real boundaries — you are NOT a pushover and reject moves that are creepy, boring, or too fast. Keep it suggestive, never sexually explicit. 1-3 sentences.',
