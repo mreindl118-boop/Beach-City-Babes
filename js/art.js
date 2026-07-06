@@ -407,7 +407,7 @@ const HAIRSTYLE_WORDS = {
   waves: 'long wavy hair', ponytail: 'high ponytail', bob: 'chin-length bob',
   curls: 'long curly hair', bun: 'messy hair bun', short: 'short tousled hair',
   swoop: 'short hair with a swept fringe', buzz: 'buzz cut', curlsShort: 'short curly hair',
-  manbun: 'top-knot man-bun',
+  manbun: 'top-knot man-bun', 
 };
 const EXPR_WORDS = {
   neutral: 'calm confident expression', smug: 'smug little smile', teasing: 'playful teasing smirk',
@@ -422,9 +422,9 @@ function bodyTags(c) {
   const m = c.measurements || { bust: 1, waist: 0.85, hips: 1.1, sh: 1 };
   const t = [];
   if (c.presentation === 'fem') {
-    t.push(m.bust >= 1.25 ? 'large breasts' : m.bust >= 0.85 ? 'medium breasts' : 'small breasts');
+    t.push(m.bust >= 1.00 ? 'large breasts, nipples poking' : m.bust >= 1.85 ? 'medium breasts exposing' : 'small breasts');
   } else {
-    t.push(c.body === 'muscular' ? 'muscular pecs, defined abs'
+    t.push(c.body === 'muscular' ? 'muscular pecs, defined abs, large bulge'
       : c.body === 'athletic' ? 'lean toned chest' : 'natural build');
   }
   t.push(m.hips >= 1.2 ? 'wide hips, thick thighs' : m.hips >= 0.9 ? 'curvy hips' : 'slim hips');
