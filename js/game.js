@@ -1867,19 +1867,58 @@ let updatePromptShown = false;
 // Check version.json and, if a newer build shipped, prompt to apply it.
 // atBoot=true shows a full modal on a fresh startup (the player asked for this);
 // otherwise a tap-to-refresh toast mid-session.
-async function checkForUpdate(atBoot = false) {
+// The update beacon is checked TWO ways, because the game ships two ways:
+// - relative version.json: on a live host (PWA / web) a newer file means new
+//   code is already being served — the service-worker apply flow updates in
+//   place.
+// - the repo's raw version.json: inside the Android APK the assets are
+//   bundled, so the relative check always sees itself (this is why updates
+//   never fired in the app). The raw beacon sees the real latest build; being
+//   bundled, the fix is a fresh APK, so we link the Releases page instead of
+//   pretending a reload would help.
+const REMOTE_BEACON = 'https://raw.githubusercontent.com/mreindl118-boop/Beach-City-Babes/claude/procedural-dating-sim-b5y3ml/version.json';
+const LATEST_APK_PAGE = 'https://github.com/mreindl118-boop/Beach-City-Babes/releases/latest';
+
+async function fetchBeacon(url) {
   try {
-    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) return;
-    const remote = await res.json();
-    if (remote.build > BUILD && !updatePromptShown) {
-      updatePromptShown = true;
-      const reg = await navigator.serviceWorker?.getRegistration();
-      await reg?.update();
-      if (atBoot) showUpdateModal(remote); else
-      toast(`✨ Update v${remote.version} ready — tap to refresh!`, true, () => applyUpdate());
-    }
-  } catch { /* offline is fine */ }
+    const res = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', signal: timeoutSignal(8000) });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+async function checkForUpdate(atBoot = false) {
+  if (updatePromptShown) return;
+  const local = await fetchBeacon('version.json');
+  if (local && local.build > BUILD) {
+    // the host is already serving newer code — swap it in via the SW
+    updatePromptShown = true;
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update();
+    if (atBoot) showUpdateModal(local);
+    else toast(`✨ Update v${local.version} ready — tap to refresh!`, true, () => applyUpdate());
+    return;
+  }
+  const remote = await fetchBeacon(REMOTE_BEACON);
+  if (remote && remote.build > BUILD) {
+    // bundled build (the APK): new version exists but needs a fresh download
+    updatePromptShown = true;
+    if (atBoot) showApkUpdateModal(remote);
+    else toast(`✨ v${remote.version} is out — tap for the download!`, true, () => window.open(LATEST_APK_PAGE, '_blank'));
+  }
+}
+
+function showApkUpdateModal(remote) {
+  openModal(`
+    <h3>✨ Update available</h3>
+    <p class="modal-text">You're on <b>v${VERSION}</b> · latest is <b>v${remote.version}</b>.<br>
+      This installed app updates by grabbing the newest APK — it installs right
+      over this one, saves intact.</p>
+    <div class="stack">
+      <button class="btn primary" id="up-get">⬇️ Get v${remote.version}</button>
+      <button class="btn" id="up-later">Later</button>
+    </div>`);
+  $('#up-get').onclick = () => { window.open(LATEST_APK_PAGE, '_blank'); closeModal(); };
+  $('#up-later').onclick = () => closeModal();
 }
 
 function showUpdateModal(remote) {
