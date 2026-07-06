@@ -491,8 +491,8 @@ export function describeCharacter(c, tier = 0, ctx = {}) {
   const expr = EXPR_WORDS[ctx.emotion] || EXPR_WORDS[emotionFor(c, tier)] || EXPR_WORDS.neutral;
   const gender = GENDER_LABELS[c.gender].toLowerCase();
   const outfit = c.presentation === 'fem'
-    ? ['a sporty one-piece swimsuit', 'a cute two-piece bikini', 'a daring string bikini and sheer sarong'][heat]
-    : ['a fitted rash guard and boardshorts', 'an open beach shirt and swim trunks', 'bare toned chest, shell necklace and low swim trunks'][heat]
+    ? ['a sporty one-piece swimsuit', 'a cute two-piece bikini','nearly naked','Kink outfit','fully nude', 'a daring string bikini and sheer sarong'][heat]
+    : ['a fitted rash guard and bulged boardshorts', 'an open beach shirt and swim trunks', 'bare toned chest, shell necklace and low swim trunks'][heat]
     ;
   const accessory = { flower: 'a hibiscus flower in the hair', shades: 'stylish sunglasses',
     hoops: 'gold hoop earrings', choker: 'a black choker', cap: 'a snapback cap',
