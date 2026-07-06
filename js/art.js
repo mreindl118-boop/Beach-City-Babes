@@ -519,6 +519,73 @@ export function describeCharacter(c, tier = 0, ctx = {}) {
   ].join(' ');
 }
 
+// ---------- selfie prompts (picture texting) ----------
+// Fully self-contained prompt builder for picture messages: its expression,
+// outfit, and scene vocabulary live HERE, versioned with the feature, and
+// keep selfies suggestive swimwear — tasteful, never explicit — as shipped.
+const SELFIE_EXPR = {
+  neutral: 'calm confident expression', smug: 'smug little smile',
+  teasing: 'playful teasing smirk', happy: 'bright warm smile',
+  laugh: 'laughing, eyes closed', shy: 'shy blush, glancing away',
+  love: 'loving gaze with sparkling eyes', sultry: 'seductive half-lidded gaze, faint blush',
+  annoyed: 'unimpressed pout', sad: 'soft wistful look', kiss: 'blowing a kiss',
+};
+const SELFIE_BODY = {
+  slim: 'slender figure', curvy: 'hourglass curvy figure', athletic: 'athletic figure',
+  soft: 'soft plush figure', muscular: 'muscular figure',
+};
+
+export function selfiePrompt(c, ctx = {}) {
+  const heat = ctx.heat ?? 0;
+  const accentName = ACCENT_NAMES[c.look.accent ?? 0];
+  const hairBase = HAIR_NAMES[c.look.hairColor] ?? 'dark';
+  const eyeName = EYE_NAMES[c.look.eyes] ?? accentName;
+  const hairStyle = HAIRSTYLE_WORDS[c.look.hairStyle] || 'stylish hair';
+  const expr = SELFIE_EXPR[ctx.emotion] || SELFIE_EXPR.happy;
+  const gender = GENDER_LABELS[c.gender].toLowerCase();
+  const outfit = c.presentation === 'fem'
+    ? ['a sporty one-piece swimsuit', 'a cute two-piece bikini', 'a daring string bikini'][heat] || 'a cute two-piece bikini'
+    : ['a fitted rash guard', 'an open beach shirt and swim trunks', 'bare toned chest and low swim trunks'][heat] || 'an open beach shirt and swim trunks';
+  const backdrop = SCENE_BACKDROPS[ctx.locationId] || 'a beautiful beach with turquoise water';
+  const light = PHASE_LIGHT[ctx.phase] || 'bright natural light';
+  return [
+    'masterpiece, best quality, highly detailed anime illustration, cute phone-selfie style,',
+    'clean cel shading, vibrant colors, candid framing,',
+    `a beautiful adult ${gender}, early-to-mid 20s, ${SELFIE_BODY[c.body] || 'lovely figure'},`,
+    `${hairStyle}, two-tone ${hairBase} hair with vivid ${accentName} tips, large expressive ${eyeName} eyes,`,
+    `${expr}, wearing ${outfit},`,
+    ctx.activity ? `${ctx.activity},` : '',
+    `${backdrop}, ${light} in the background,`,
+    'casual phone selfie taken at arm\u2019s length, vertical composition, playful candid energy,',
+    'suggestive but tasteful, swimwear only, safe-for-work',
+  ].filter(Boolean).join(' ');
+}
+
+// ---------- finale prompt (the bonfire, generative to the relationship) ----------
+// Self-contained like selfiePrompt: the words are versioned with the feature.
+// The scene reflects THIS relationship — the partner's look, how exclusive it
+// is, how hot the summer ran — and always resolves as romantic firelight and a
+// kiss: cinematic, suggestive, fade-to-black.
+export function finalePrompt(c, player, opts = {}) {
+  const accentName = ACCENT_NAMES[c.look.accent ?? 0];
+  const hairBase = HAIR_NAMES[c.look.hairColor] ?? 'dark';
+  const hairStyle = HAIRSTYLE_WORDS[c.look.hairStyle] || 'stylish hair';
+  const gender = GENDER_LABELS[c.gender].toLowerCase();
+  const plGender = GENDER_LABELS[player.gender]?.toLowerCase() || 'person';
+  const closeness = opts.agreement === 'exclusive'
+    ? 'holding each other like a promise'
+    : (opts.desire ?? 0) >= 85 ? 'pulled tight together, foreheads touching'
+    : 'leaning into each other, fingers laced';
+  return [
+    'masterpiece, best quality, breathtaking romantic anime illustration, cinematic wide shot,',
+    'a couple at a beach bonfire at night, embers and fireflies rising, moonlit ocean behind,',
+    `a beautiful adult ${gender} with ${hairStyle}, two-tone ${hairBase} hair with vivid ${accentName} tips, in beachwear,`,
+    `and their adult ${plGender} partner in beachwear, ${closeness}, about to kiss,`,
+    'firelight rim lighting, deep blue night palette with warm orange glow, fireworks far in the sky,',
+    'tender, intimate, suggestive but tasteful, fully clothed beachwear, safe-for-work, fade-to-black romance',
+  ].join(' ');
+}
+
 // Floating heart burst over an element (feedback for good moves).
 export function heartBurst(el, n = 6, symbol = '💗') {
   const rect = el.getBoundingClientRect();

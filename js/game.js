@@ -16,7 +16,7 @@ import {
 import {
   portraitSVG, setEmotion, emotionFor, heartBurst, heatLevel,
   finaleSVG, spawnFireworks, describeCharacter, shade,
-  portraitSeed, NEGATIVE_PROMPT,
+  portraitSeed, NEGATIVE_PROMPT, selfiePrompt, finalePrompt,
 } from './art.js';
 import {
   PHASES, phaseOf, phaseInfo, isNightPhase, LOCATIONS, locationById,
@@ -179,7 +179,38 @@ function show(screen) {
 }
 
 // ----- title / slots -----
+// Dress the title screen: two procedurally-drawn sticker babes lounging at
+// the edges (fixed seeds so the menu has a consistent cast) and a slow drift
+// of hearts/sparkles. Pure vector + CSS — plays anywhere, even offline.
+function ensureTitleScene() {
+  const l = $('#tb-l'), r = $('#tb-r');
+  if (l && !l.dataset.built) {
+    const t1 = new RNG(20260707), t2 = new RNG(8675309);
+    const a = generateCharacter(t1, new Set());
+    const b = generateCharacter(t2, new Set([a.name]));
+    a.desire = 60; b.desire = 60; // sunset-warm looks
+    l.innerHTML = portraitSVG(a, 'titleL', 1);
+    r.innerHTML = portraitSVG(b, 'titleR', 1);
+    setEmotion(l, 'teasing');
+    setEmotion(r, 'smug');
+    l.dataset.built = r.dataset.built = '1';
+  }
+  const sp = $('#title-sparkles');
+  if (sp && !sp.dataset.built) {
+    const bits = ['💗', '✨', '🍑', '💛', '✨', '💗'];
+    sp.innerHTML = Array.from({ length: 14 }, (_, i) => {
+      const left = (i * 7.3 + Math.random() * 5) % 100;
+      const dur = 9 + Math.random() * 9;
+      const delay = Math.random() * 12;
+      const size = 13 + Math.random() * 15;
+      return `<span class="ts-heart" style="left:${left}%;font-size:${size}px;animation-duration:${dur}s;animation-delay:${delay}s">${bits[i % bits.length]}</span>`;
+    }).join('');
+    sp.dataset.built = '1';
+  }
+}
+
 function renderTitle() {
+  ensureTitleScene();
   const wrap = $('#slot-list');
   wrap.innerHTML = '';
   for (const n of SLOTS) {
@@ -393,24 +424,65 @@ function portraitLook(c, tier, heat) {
 // A selfie for picture texting: the same art pipeline, framed as a phone
 // selfie, set wherever THAT character is right now (not where the player is).
 // Falls back to their sticker portrait as the 'photo' when offline.
-async function npcSelfie(c) {
+// wish = a pic REQUEST parsed from the player's own text ("let me see you
+// smiling on the beach") into whitelisted attributes. Raw chat text never
+// enters an image prompt — only these vocabulary-mapped fields do, so the
+// swimwear tone ceiling holds no matter what gets typed.
+async function npcSelfie(c, wish = {}) {
   const tier = tierFor(c);
   const heat = heatLevel(c, tier);
-  const there = npcLocation(c, curPhase(), S.worldSeed);
-  const ctx = { emotion: emotionFor(c, tier), locationId: there, phase: curPhase() };
-  const key = `selfie:${c.id}:${heat}:${ctx.emotion}:${there}:${ctx.phase}`;
+  const there = wish.locationId || npcLocation(c, curPhase(), S.worldSeed);
+  const ctx = { emotion: wish.emotion || emotionFor(c, tier), locationId: there, phase: curPhase() };
+  const key = `selfie:${c.id}:${heat}:${ctx.emotion}:${there}:${ctx.phase}:${wish.activity || ''}`;
   window.BCB_PORTRAIT_CACHE ??= {};
   if (window.BCB_PORTRAIT_CACHE[key]) return window.BCB_PORTRAIT_CACHE[key];
   const prov = window.BCB_PORTRAIT_PROVIDER;
   if (typeof prov === 'function') {
     try {
-      const prompt = describeCharacter(c, tier, ctx)
-        + ', casual phone selfie taken at arm\u2019s length, playful candid energy, vertical composition';
+      const prompt = selfiePrompt(c, { ...ctx, heat, activity: wish.activity });
       const url = await prov(prompt, c, heat);
       if (url) { window.BCB_PORTRAIT_CACHE[key] = url; return url; }
     } catch { /* fall through to sticker */ }
   }
   return 'data:image/svg+xml;utf8,' + encodeURIComponent(portraitSVG(c, `selfie${uidCounter++}`, tier));
+}
+
+// Parse a typed text into a pic request. Everything is whitelist-mapped:
+// expressions to the art engine's emotion ids, places to real town locations,
+// activities to a small tasteful phrase bank. Explicit asks are flagged so the
+// character can hold their own boundary in reply.
+const PIC_ASK_RE = /\b(pic|picture|photo|selfie|snap)\b|let me see (you|ya)|show me (you|yourself|that smile)/i;
+const PIC_EXPLICIT_RE = /\b(nude|naked|topless|nsfw|xxx|boobs?|tits?|dick|cock|pussy|genitals?|nipples?|strip)\b/i;
+function parsePicRequest(text) {
+  const low = text.toLowerCase();
+  if (!PIC_ASK_RE.test(low)) return null;
+  if (PIC_EXPLICIT_RE.test(low)) return { explicit: true };
+  const emotion =
+    /laugh/.test(low) ? 'laugh'
+    : /smil|happy|grin|cheer/.test(low) ? 'happy'
+    : /wink|tease|smirk/.test(low) ? 'teasing'
+    : /shy|cute|blush/.test(low) ? 'shy'
+    : /sexy|sultry|hot|bedroom/.test(low) ? 'sultry'
+    : /kiss/.test(low) ? 'kiss'
+    : null;
+  let locationId = null;
+  for (const l of LOCATIONS) {
+    const bare = l.name.toLowerCase().replace(/^the /, '');
+    if (low.includes(bare) || low.includes(l.id)) { locationId = l.id; break; }
+  }
+  const activity = ([
+    [/danc/, 'mid-dance-move'],
+    [/stretch|yoga/, 'doing a graceful stretch'],
+    [/sunbath|tanning|lying|towel/, 'lounging on a beach towel'],
+    [/workout|lift|flex|muscle/, 'flexing playfully mid-workout'],
+    [/cocktail|drink|smoothie/, 'holding a colorful drink'],
+    [/blow.*kiss/, 'blowing a kiss at the camera'],
+    [/peace/, 'flashing a peace sign'],
+    [/wave/, 'waving at the camera'],
+    [/swim|water|ocean|waves/, 'ankle-deep in the surf'],
+    [/sunset/, 'with the sunset glowing behind'],
+  ].find(([re]) => re.test(low)) || [])[1] || null;
+  return { emotion, locationId, activity };
 }
 
 function renderPortrait(c, tier, heat, look = portraitLook(c, tier, heat)) {
@@ -778,7 +850,11 @@ let awaitingReply = false;
 // Contextual chip row above the input: who else is here to approach, plus
 // Heart-to-heart / Come clean. Input is gated by whether you're actually with
 // someone — you can't chat with people who aren't at your location.
-const textsLeft = c => TEXTS_PER_NPC_PER_DAY - (S.player.textsSent[c.id] ?? 0);
+const textsLeft = () => Infinity; // texting is unlimited — talk all night
+
+// You know someone once you've actually exchanged words (any chat history).
+// Strangers don't have your number: no texts from them, no texting them.
+const hasMet = c => (S.logs?.[c.id]?.length ?? 0) > 0;
 
 function refreshChatBar() {
   const c = active();
@@ -786,13 +862,13 @@ function refreshChatBar() {
   const here = presentNPCs();
   const withThem = isPresent(c);
   const texting = !withThem && !activeScene; // apart = the phone comes out
-  const canText = texting && textsLeft(c) > 0;
+  const canText = texting && hasMet(c);
   input.disabled = awaitingReply || (texting && !canText);
   input.placeholder = activeScene ? 'Type your answer, or tap a choice above…'
     : awaitingReply ? '…'
     : withThem ? `Say something to ${c.name}…`
-    : canText ? `📱 Text ${c.name}… (${textsLeft(c)} left today)`
-    : `📱 You've texted ${c.name} enough for one day.`;
+    : canText ? `📱 Text ${c.name}…`
+    : `📱 You haven't met ${c.name} yet — find them around town first.`;
 
   // the banner + bubble style make it unmistakable: phone vs face-to-face
   const banner = $('#chat-banner');
@@ -811,7 +887,7 @@ function refreshChatBar() {
 
   const chips = [];
   // picture texting: ask for a pic once you're at least flirting
-  if (texting && textsLeft(c) > 0 && tierFor(c) >= 1)
+  if (texting && hasMet(c) && tierFor(c) >= 1)
     chips.push(`<button class="chip mini action" data-chip="pic" ${awaitingReply ? 'disabled' : ''}>📸 Ask for a pic</button>`);
   // approach anyone else present — but not while a reply is in flight, so a
   // pending generative reply can't be cross-wired into another conversation
@@ -852,9 +928,11 @@ function sendTyped() {
 
   // apart = the phone: typed messages become texts (with the daily limit)
   if (!isPresent(c)) {
-    if (textsLeft(c) <= 0) { toast(`No more texts to ${c.name} today.`); return; }
-    S.player.textsSent[c.id] = (S.player.textsSent[c.id] ?? 0) + 1;
+    if (!hasMet(c)) { toast(`You haven't met ${c.name} yet.`); return; }
     playerSay(`📱 ${text}`);
+    // "let me see you smiling on the beach…" — pic requests get a picture back
+    const wish = parsePicRequest(text);
+    if (wish) { askForPic(c, { wish, typed: true }); return; }
     npcReply(c, text, { texting: true });
     return;
   }
@@ -939,11 +1017,24 @@ async function npcReply(c, text, { texting = false } = {}) {
 
 // 📸 picture texting: ask and you might receive — desire, boldness, and tier
 // decide. A yes costs a text slot and comes back as a real picture message.
-async function askForPic(c) {
-  if (textsLeft(c) <= 0) { toast(`No more texts to ${c.name} today.`); return; }
+async function askForPic(c, { wish = null, typed = false } = {}) {
   const S0 = S;
-  S.player.textsSent[c.id] = (S.player.textsSent[c.id] ?? 0) + 1;
-  playerSay('📱 Send me a pic? 😏');
+  if (!typed) { // the 📸 chip; typed requests already logged their own line
+    playerSay('📱 Send me a pic? 😏');
+  }
+  // asking past the tone ceiling gets a boundary, in character, every time
+  if (wish?.explicit) {
+    setTimeout(() => {
+      if (S !== S0) return;
+      logTo(c.id, 'npc', `📱 ${rng.pick([
+        'Ha — nice try, cutie. Swimsuit is as far as this camera goes. 😏',
+        'That\u2019s a no. A cute no, but a no. 😘',
+        'Wow, bold. The answer\u2019s still a bikini pic or nothing. 💅',
+      ])}`);
+      save(); refreshChatBar();
+    }, 700);
+    return;
+  }
   const tier = tierFor(c);
   const p = Math.min(0.9, 0.25 + 0.18 * tier + c.desire / 220 + c.boldness * 0.2);
   if (!rng.chance(p)) {
@@ -959,13 +1050,18 @@ async function askForPic(c) {
     }, 700);
     return;
   }
-  const caption = rng.pick([
+  const caption = rng.pick(wish ? [
+    'Like this? 😏',
+    'Your wish, cutie. 😘',
+    'Happy now? Because I am. 🙈',
+    'Demanding! …I like it. 💋',
+  ] : [
     'Just for you. Don\u2019t share it. 😘',
     'Since you asked so nicely… 😏',
     'Thinking of you anyway. 💋',
     'Quick — before I change my mind. 🙈',
   ]);
-  const img = await npcSelfie(c);
+  const img = await npcSelfie(c, wish || {});
   if (S !== S0) return;
   applyDelta(c, 2, 5);
   setTimeout(() => {
@@ -1352,6 +1448,9 @@ function openBoosts() {
 
 function openInventory() {
   const items = BOOSTS.filter(b => (S.player.inv[b.id] ?? 0) > 0);
+  // personal gear from Afterglow lives here too — it was invisible before,
+  // which read as the shop eating your money
+  const gear = ADULT_ITEMS.filter(it => it.kind !== 'protection' && it.id !== 'test' && (S.player.inv[it.id] ?? 0) > 0);
   const body = `
     <h3>🎒 Inventory</h3>
     ${items.length ? `<div class="stack">
@@ -1359,7 +1458,15 @@ function openInventory() {
         <span>${b.emoji}</span><b>${b.name} ×${S.player.inv[b.id]}</b>
         <span class="text-preview">${b.desc}</span>
       </button>`).join('')}
-    </div>` : '<p class="modal-text">Empty. The 🧪 Boosts shop beckons.</p>'}
+    </div>` : '<p class="modal-text">No boosts. The 🧪 Boosts shop beckons.</p>'}
+    ${gear.length ? `<p class="modal-text" style="margin-top:10px"><b>🔞 Personal gear</b> — carried with you; unlocks the spicier intimate dates.</p>
+    <div class="stack">
+      ${gear.map(it => `<div class="roster-row">
+        <span>${it.emoji}</span><b>${it.name}</b>
+        <span class="text-preview">✓ owned</span>
+      </div>`).join('')}
+    </div>` : ''}
+    ${(S.player.condoms ?? 0) > 0 ? `<p class="modal-text" style="margin-top:6px">🍌 Condoms: <b>${S.player.condoms}</b></p>` : ''}
     <button class="btn" id="to-boosts" style="margin-top:10px">🧪 Buy boosts</button>`;
   openModal(body);
   $('#modal-body').querySelectorAll('[data-use]').forEach(b => b.onclick = () => {
@@ -1390,16 +1497,12 @@ function openPhone() {
         return c ? `<button class="roster-row unread" data-npc="${t.npcId}"><b>${c.name}</b><span class="text-preview">${t.text}</span></button>` : '';
       }).join('')}
     </div>` : ''}
-    <p class="modal-text"><b>Text someone</b> (${TEXTS_PER_NPC_PER_DAY}/day each)</p>
+    <p class="modal-text"><b>Text someone</b></p>
     <div class="stack">
-      ${S.npcs.map(c => {
-        const sent = S.player.textsSent[c.id] ?? 0;
-        const left = TEXTS_PER_NPC_PER_DAY - sent;
-        return `<button class="roster-row" data-contact="${c.id}" ${left <= 0 ? 'disabled' : ''}>
+      ${S.npcs.filter(hasMet).map(c => `<button class="roster-row" data-contact="${c.id}">
           <b>${c.name}</b><span class="text-preview">${tierLabel(tierFor(c))}${c.partner ? ' 💘' : ''}</span>
-          <span class="roster-meters">${left > 0 ? `✉️×${left}` : 'tomorrow'}</span>
-        </button>`;
-      }).join('')}
+          <span class="roster-meters">✉️</span>
+        </button>`).join('') || '<p class="modal-text">No numbers yet — go meet people first.</p>'}
     </div>`;
   openModal(body);
   $('#modal-body').querySelectorAll('[data-npc]').forEach(b => b.onclick = () => { closeModal(); switchTo(b.dataset.npc); });
@@ -1499,7 +1602,8 @@ function doSleep() {
       c.pendingCheatConfess = true;
       S.texts.push({ npcId: c.id, read: false, day: S.player.day, text: 'Can we talk? It’s important. I’d rather say it to your face. 🥺' });
     }
-    // proactive texting
+    // proactive texting — but strangers don't have your number
+    if (!hasMet(c)) continue;
     let kind = null;
     if (c.partner && rng.chance(0.5)) kind = 'partner';
     else if (neglected && rng.chance(0.85)) {
@@ -1646,6 +1750,26 @@ function startFinale() {
     <div class="finale-stage">${finaleSVG(c)}<div class="fw-layer"></div></div>
     <div class="finale-text" id="finale-text"></div>
     <button class="btn primary hidden" id="finale-done">💘 Morning comes</button>`;
+  // the bonfire is generative to the relationship: a painted scene of YOUR
+  // couple fades in over the animated placeholder (which stays if offline)
+  const provArt = window.BCB_PORTRAIT_PROVIDER;
+  if (typeof provArt === 'function') {
+    const S0f = S;
+    Promise.resolve(provArt(
+      finalePrompt(c, playerForDialogue(), { agreement: c.agreement, desire: c.desire }),
+      c, 2,
+    )).then(url => {
+      if (!url || S !== S0f) return;
+      const stageEl = ov.querySelector('.finale-stage');
+      if (stageEl && !ov.classList.contains('hidden')) {
+        const im = document.createElement('img');
+        im.className = 'finale-art';
+        im.alt = 'Your bonfire night';
+        im.src = url;
+        stageEl.prepend(im);
+      }
+    }).catch(() => {});
+  }
   const lines = FINALE_SCRIPT.map(l => l
     .replaceAll('{name}', c.name).replaceAll('{sub}', p.sub).replaceAll('{pos}', p.pos));
   const textEl = $('#finale-text');
@@ -1687,7 +1811,27 @@ function doSleepAfterFinale() {
   S.player.day += 1;
   S.player.hour = 10;
   narrate(`🌅 Day ${S.player.day}. You wake up grinning. ${c.name} is officially your flame. 💘 Hearts won: ${S.player.heartsWon}`);
-  npcSay(proactiveText(c, playerForDialogue(), rng, 'partner'));
+  // the morning-after text is generative to the relationship too
+  (async () => {
+    const S0 = S;
+    let line = proactiveText(c, playerForDialogue(), rng, 'partner');
+    const prov = window.BCB_CHAT_PROVIDER;
+    if (typeof prov === 'function') {
+      try {
+        const pl = playerForDialogue();
+        const recent = (S.logs[c.id] || []).slice(-8).filter(e => e.who !== 'sys')
+          .map(e => `${e.who === 'me' ? S.player.name : c.name}: ${e.text}`);
+        const persona = chatPersona(c, pl, recent, { phase: phaseOf(S.player.hour), day: S.player.day });
+        persona.channel = 'text';
+        persona.steer = 'Last night you two shared the bonfire finale — the kiss, the fireworks, becoming official. Send the giddy, tender morning-after text this deserves. Reference your night together. Suggestive is fine; never explicit.';
+        const out = await prov('good morning 😊', persona, { tier: tierFor(c) });
+        if (out && typeof out === 'string') line = out.trim().replace(/^📱\s*/, '');
+      } catch { /* canned line stands */ }
+    }
+    if (S !== S0) return;
+    logTo(c.id, 'npc', `📱 ${line}`);
+    save();
+  })();
   lastLook = '';
   renderAll();
   save();
@@ -2145,6 +2289,7 @@ function boot() {
     renderTitle();
   }
   show('#title-screen');
+  ensureTitleScene(); // the beach animates behind the age gate too
   installChatProvider();
   installArtProvider();
   registerSW();

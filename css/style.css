@@ -384,3 +384,67 @@ body.night .iconbtn { color: #ffe9f1; }
   display: block; width: 100%; max-width: 220px; border-radius: 12px;
   margin-bottom: 4px; box-shadow: 0 3px 10px rgba(0,0,0,0.3);
 }
+
+/* ---------- animated title scene ---------- */
+#title-screen { position: relative; overflow: hidden; }
+#title-scene { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+#ts-sky { width: 100%; height: 100%; display: block; }
+.ts-sun { animation: ts-sunbob 12s ease-in-out infinite; }
+@keyframes ts-sunbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(14px); } }
+.ts-wave.w1 { animation: ts-drift 9s linear infinite; }
+.ts-wave.w2 { animation: ts-drift 13s linear infinite reverse; }
+@keyframes ts-drift { from { transform: translateX(0); } to { transform: translateX(200px); } }
+.ts-palm.pl { transform-origin: 140px 900px; animation: ts-sway 7s ease-in-out infinite; }
+.ts-palm.pr { transform-origin: 1300px 900px; animation: ts-sway 8.5s ease-in-out infinite reverse; }
+@keyframes ts-sway { 0%,100% { transform: rotate(-1.6deg); } 50% { transform: rotate(1.8deg); } }
+
+#title-sparkles { position: absolute; inset: 0; overflow: hidden; }
+.ts-heart {
+  position: absolute; bottom: -40px; opacity: 0;
+  animation: ts-float linear infinite;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.2));
+}
+@keyframes ts-float {
+  0% { transform: translateY(0) rotate(-8deg); opacity: 0; }
+  8% { opacity: 0.9; }
+  90% { opacity: 0.6; }
+  100% { transform: translateY(-105vh) rotate(10deg); opacity: 0; }
+}
+
+#title-babes { position: absolute; inset: 0; }
+#tb-l, #tb-r {
+  position: absolute; bottom: -12px; width: min(220px, 22vw);
+  filter: drop-shadow(0 8px 18px rgba(0,0,0,0.3));
+}
+#tb-l { left: 1.5vw; animation: tb-lean 6s ease-in-out infinite; }
+#tb-r { right: 1.5vw; animation: tb-lean 7.4s ease-in-out infinite reverse; }
+@keyframes tb-lean { 0%,100% { transform: rotate(-2.4deg) translateY(0); } 50% { transform: rotate(1.6deg) translateY(-8px); } }
+@media (max-width: 760px) { #tb-l, #tb-r { display: none; } }
+
+.title-inner { position: relative; z-index: 1; }
+h1.shimmer {
+  background: linear-gradient(100deg, #fff 20%, #ffd166 40%, #fff 60%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ts-shimmer 5s linear infinite;
+  text-shadow: none;
+  filter: drop-shadow(0 3px 0 rgba(0,0,0,0.22));
+}
+h1.shimmer span { -webkit-text-fill-color: transparent; }
+@keyframes ts-shimmer { from { background-position: 120% 0; } to { background-position: -100% 0; } }
+#title-screen .panel, #title-screen .slot-card {
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(6px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-sun, .ts-wave, .ts-palm, .ts-heart, #tb-l, #tb-r, h1.shimmer, .logo { animation: none !important; }
+}
+
+/* generative finale scene — fades in over the animated SVG placeholder */
+.finale-stage { position: relative; }
+.finale-art {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; border-radius: inherit;
+  animation: art-fade 1.6s ease;
+}

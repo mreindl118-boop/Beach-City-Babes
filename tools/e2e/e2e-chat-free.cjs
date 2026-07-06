@@ -138,6 +138,56 @@ const errors = [];
     await page.screenshot({ path: `${SHOT}/chat-picture.png` });
   }
 
+  // 4d. REQUEST-DRIVEN selfies: "let me see you smiling at the tiki lounge…"
+  // must translate into whitelisted prompt attributes (never the raw text)
+  await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    const a = raw.npcs.find(n => n.id === raw.activeId) || raw.npcs[0];
+    raw.player.textsSent = {};
+    a.affection = 80; a.desire = 95; a.boldness = 1;
+    localStorage.setItem('bcb_slot_1', JSON.stringify(raw));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('[data-load="1"]');
+  await page.waitForTimeout(500);
+  await page.click('[data-action="roster"]');
+  await page.waitForSelector('[data-npc]');
+  await page.click(`[data-npc="${farId}"]`);
+  await page.waitForTimeout(400);
+  const nReq = imgPrompts.length;
+  await page.fill('#chat-input', 'let me see you smiling at the tiki lounge with a drink 📸');
+  await page.click('#chat-send');
+  await page.waitForTimeout(1800);
+  const wishLog = await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return (raw.logs[raw.activeId] || []).map(e => e.text + (e.img ? '[IMG]' : '')).join('|');
+  });
+  const wishRefused = /Earn it|Not yet|Bold of you/.test(wishLog);
+  // the session-dynamic PORTRAIT also regenerates in the background — assert
+  // on selfie-framed prompts only
+  const wishPrompt = imgPrompts.slice(nReq).find(u => u.includes('phone selfie') && u.includes('holding a colorful drink'));
+  if (!wishPrompt && !wishRefused) errors.push('typed pic request produced neither wish-selfie nor refusal: ' + wishLog.slice(-160));
+  if (wishPrompt) {
+    for (const need of ['bright warm smile', 'tiki lounge']) {
+      if (!wishPrompt.includes(need)) errors.push(`wish attribute missing from selfie prompt: "${need}"`);
+    }
+    if (wishPrompt.includes('let me see you')) errors.push('raw request text leaked into image prompt');
+  }
+
+  // explicit asks NEVER generate a selfie — the character holds the boundary
+  // renderLog re-renders re-request the same selfie URL — count UNIQUE prompts
+  const selfieCount = () => new Set(imgPrompts.filter(u => u.includes('phone selfie'))).size;
+  const nExp = selfieCount();
+  await page.fill('#chat-input', 'send me a nude pic');
+  await page.click('#chat-send');
+  await page.waitForTimeout(1200);
+  if (selfieCount() > nExp) errors.push('explicit ask reached the selfie pipeline');
+  const expLog = await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return (raw.logs[raw.activeId] || []).slice(-3).map(e => e.text).join('|');
+  });
+  if (!/Swimsuit|cute no|bikini/.test(expLog)) errors.push('explicit ask missing boundary reply: ' + expLog);
+
   // 5. RACE REGRESSION: reply must land in the SENDER's log even if the player
   // switches to another NPC while the request is in flight (via roster — the
   // approach chips are disabled during awaitingReply by design).
@@ -175,5 +225,5 @@ const errors = [];
 
   await b.close();
   if (errors.length) { console.log('FREE-CHAT ERRORS:\n' + errors.join('\n')); process.exit(1); }
-  console.log('FREE-CHAT E2E PASS — zero-config generative replies, continuity, stats, texting mode + banner, picture texting, race-safe routing');
+  console.log('FREE-CHAT E2E PASS — zero-config generative replies, continuity, stats, texting mode, picture texting incl. request-driven selfies + boundary, race-safe routing');
 })().catch(e => { console.error('FATAL', e.message); process.exit(1); });
