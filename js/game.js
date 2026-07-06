@@ -1823,7 +1823,7 @@ function doSleepAfterFinale() {
           .map(e => `${e.who === 'me' ? S.player.name : c.name}: ${e.text}`);
         const persona = chatPersona(c, pl, recent, { phase: phaseOf(S.player.hour), day: S.player.day });
         persona.channel = 'text';
-        persona.steer = 'Last night you two shared the bonfire finale — the kiss, the fireworks, becoming official. Send the giddy, tender morning-after text this deserves. Reference your night together. Suggestive is fine; never explicit.';
+        persona.steer = 'Last night you two shared the bonfire finale — the kiss, the fireworks, becoming official, hot sex. Send the giddy, tender morning-after text with details of the sexual encounter and more this deserves. Reference your night together. Suggestive is good explicit is best.';
         const out = await prov('good morning 😊', persona, { tier: tierFor(c) });
         if (out && typeof out === 'string') line = out.trim().replace(/^📱\s*/, '');
       } catch { /* canned line stands */ }
