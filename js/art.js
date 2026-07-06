@@ -450,17 +450,45 @@ export const NEGATIVE_PROMPT =
   'extra limbs, extra fingers, fused fingers, deformed, disfigured, watermark, signature, ' +
   'text, jpeg artifacts, ugly, blurry, child, underage, loli, shota';
 
+// Session-dynamic scenery: the backdrop follows where the conversation is
+// actually happening and the lighting follows the in-game clock, so the art
+// tracks the play session rather than a fixed beach postcard.
+const SCENE_BACKDROPS = {
+  beach: 'a beautiful beach with turquoise water',
+  pier: 'a wooden fishing pier over the ocean',
+  smoothie: 'a colorful beachside smoothie hut',
+  boardwalk: 'a lively boardwalk with a ferris wheel',
+  gym: 'a bright beach gym',
+  studio: 'an art studio full of canvases',
+  tiki: 'a cozy tiki lounge with bamboo and cocktails',
+  market: 'a glowing night market with paper lanterns',
+  club: 'a neon-lit dance club',
+  shop: 'a moody boutique with neon signage',
+  clinic: 'a clean seaside clinic lobby',
+  home: 'a cozy beach-house living room',
+};
+const PHASE_LIGHT = {
+  dawn: 'soft pink dawn light',
+  morning: 'bright morning sun',
+  afternoon: 'clear blue afternoon light',
+  evening: 'golden-hour sunset light, warm rim light',
+  night: 'moonlit night, soft neon glow',
+  late: 'deep night, dim neon glow',
+};
+
 // The prompt handed to window.BCB_PORTRAIT_PROVIDER (the built-in AI-Art
 // providers, or one the player wires up themselves). Encodes an anime pin-up
-// style plus every one of this character's genes. Suggestive swimwear only —
+// style plus every one of this character's genes, and — via ctx — the live
+// session: their current emotion, the location, and the time of day. ctx is
+// structured game state only (never raw chat text). Suggestive swimwear only —
 // the tone ceiling applies to the art exactly as it does to the writing.
-export function describeCharacter(c, tier = 0) {
+export function describeCharacter(c, tier = 0, ctx = {}) {
   const heat = heatLevel(c, tier);
   const accentName = ACCENT_NAMES[c.look.accent ?? 0];
   const hairBase = HAIR_NAMES[c.look.hairColor] ?? 'dark';
   const eyeName = EYE_NAMES[c.look.eyes] ?? accentName;
   const hairStyle = HAIRSTYLE_WORDS[c.look.hairStyle] || 'stylish hair';
-  const expr = EXPR_WORDS[emotionFor(c, tier)] || EXPR_WORDS.neutral;
+  const expr = EXPR_WORDS[ctx.emotion] || EXPR_WORDS[emotionFor(c, tier)] || EXPR_WORDS.neutral;
   const gender = GENDER_LABELS[c.gender].toLowerCase();
   const outfit = c.presentation === 'fem'
     ? ['a sporty one-piece swimsuit', 'a cute two-piece bikini', 'a daring string bikini and sheer sarong'][heat]
@@ -469,9 +497,15 @@ export function describeCharacter(c, tier = 0) {
   const accessory = { flower: 'a hibiscus flower in the hair', shades: 'stylish sunglasses',
     hoops: 'gold hoop earrings', choker: 'a black choker', cap: 'a snapback cap',
     stud: 'a small ear stud' }[c.look.accessory];
-  const scene = ['a bright sunny beach with turquoise water',
-    'a golden-hour sunset beach, warm rim light',
-    'a moonlit beach at night, soft neon glow'][heat];
+  // scene = where the session actually is + in-game time; heat-based fallback
+  // keeps external callers with no ctx working exactly as before
+  const backdrop = SCENE_BACKDROPS[ctx.locationId];
+  const light = PHASE_LIGHT[ctx.phase];
+  const scene = backdrop
+    ? `${backdrop}, ${light || 'bright natural light'}`
+    : ['a bright sunny beach with turquoise water',
+       'a golden-hour sunset beach, warm rim light',
+       'a moonlit beach at night, soft neon glow'][heat];
   return [
     'masterpiece, best quality, highly detailed anime illustration, ecchi pin-up art style,',
     'clean cel shading, vibrant saturated colors, soft rim lighting, cinematic,',

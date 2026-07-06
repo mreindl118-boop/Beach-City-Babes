@@ -40,7 +40,7 @@ const slotKey = n => `bcb_slot_${n}`;
 let rng = new RNG(randomSeed());
 let S = null;          // live game state
 let uidCounter = 0;
-let lastHeat = -1;
+let lastLook = ''; // portrait look-key: heat+emotion+location+phase — art follows the session
 
 // ---------------- state ----------------
 // Starting stats per role: what kind of hot you arrive as.
@@ -244,7 +244,7 @@ function finishCreator() {
 // ---------------- game rendering ----------------
 function startGame() {
   show('#game-screen');
-  lastHeat = -1;
+  lastLook = '';
   activeScene = null; awaitingReply = false;
   // focus whoever you're actually with; if your last person isn't here, pick present
   if (!isPresent(active())) {
@@ -300,10 +300,14 @@ function renderChar(forcePortrait = false) {
   const arch = archetypeOf(c);
   const interested = isInterested(c, playerForDialogue());
 
-  if (forcePortrait || heat !== lastHeat) {
+  // the generated art is dynamic to the session: it re-renders whenever the
+  // character's live emotion, the location, the time of day, or the heat tier
+  // changes — not only heat. Previously seen looks come straight from cache.
+  const look = portraitLook(c, tier, heat);
+  if (forcePortrait || look.key !== lastLook) {
     ensureMeasurements(c, rng);
-    renderPortrait(c, tier, heat);
-    lastHeat = heat;
+    renderPortrait(c, tier, heat, look);
+    lastLook = look.key;
   }
   setEmotion($('#portrait-box'), emotionFor(c, tier));
 
@@ -348,10 +352,24 @@ function renderChar(forcePortrait = false) {
 
 // Portrait pipeline: procedural sticker SVG by default. If the player wires
 // up window.BCB_PORTRAIT_PROVIDER = async (prompt, character, heat) => dataURL
-// (their own image-gen backend), generated art replaces the SVG per heat tier.
+// (their own image-gen backend), generated art replaces the SVG per look —
+// heat tier + live emotion + location + time of day, cached per combination.
 const pendingPortraits = new Set();
-function renderPortrait(c, tier, heat) {
-  const key = `${c.id}:${heat}`;
+
+// The "look" a portrait is generated for: heat tier + live emotion + where the
+// session is + in-game time of day. Structured game state only — chat text
+// never flows into image prompts.
+function portraitLook(c, tier, heat) {
+  const ctx = {
+    emotion: emotionFor(c, tier),
+    locationId: S.player.location,
+    phase: phaseOf(S.player.hour),
+  };
+  return { ctx, key: `${c.id}:${heat}:${ctx.emotion}:${ctx.locationId}:${ctx.phase}` };
+}
+
+function renderPortrait(c, tier, heat, look = portraitLook(c, tier, heat)) {
+  const key = look.key;
   window.BCB_PORTRAIT_CACHE ??= {};
   const ext = window.BCB_PORTRAIT_CACHE[key];
   if (ext) {
@@ -365,11 +383,11 @@ function renderPortrait(c, tier, heat) {
   if (typeof prov === 'function' && !pendingPortraits.has(key)) {
     pendingPortraits.add(key);
     box.classList.add('art-gen'); // shimmer badge while the model draws
-    Promise.resolve(prov(describeCharacter(c, tier), c, heat))
+    Promise.resolve(prov(describeCharacter(c, tier, look.ctx), c, heat))
       .then(url => {
         if (url) {
           window.BCB_PORTRAIT_CACHE[key] = url;
-          if (S?.activeId === c.id) { lastHeat = -1; renderChar(true); }
+          if (S?.activeId === c.id) { lastLook = ''; renderChar(true); }
         }
       })
       .catch(() => {})
@@ -660,7 +678,7 @@ function arrive(loc, announce) {
   // focus someone present (prefer whoever you were already with)
   if (!isPresent(active())) {
     const pick = here.find(c => isInterested(c, playerForDialogue())) || here[0];
-    if (pick) { S.activeId = pick.id; lastHeat = -1; }
+    if (pick) { S.activeId = pick.id; lastLook = ''; }
   }
   if (met) {
     // your reputation precedes you — beloved gets a warm start, notorious a wary one
@@ -1413,7 +1431,7 @@ function switchTo(id) {
   if (prev && prev.id !== id) prev.spark = 0; // walking away breaks the spark
   S.activeId = id;
   activeScene = null; awaitingReply = false;
-  lastHeat = -1;
+  lastLook = '';
   renderAll();
   const c = active();
   // deliver unread texts from them into chat
@@ -1502,7 +1520,7 @@ function doSleepAfterFinale() {
   S.player.hour = 10;
   narrate(`🌅 Day ${S.player.day}. You wake up grinning. ${c.name} is officially your flame. 💘 Hearts won: ${S.player.heartsWon}`);
   npcSay(proactiveText(c, playerForDialogue(), rng, 'partner'));
-  lastHeat = -1;
+  lastLook = '';
   renderAll();
   save();
 }
@@ -1895,7 +1913,7 @@ function openArtSettings() {
     installArtProvider();
     closeModal();
     toast(m === 'off' ? 'Drawn sticker art.' : '🖼️ Generative art on — redrawing…');
-    if (S && S.activeId) { lastHeat = -1; renderChar(true); }
+    if (S && S.activeId) { lastLook = ''; renderChar(true); }
   };
 }
 
