@@ -1,6 +1,6 @@
 // Service worker: offline play + versioned cache for auto-update.
 // VERSION is kept in sync with js/version.js + version.json by tools/bump_version.py.
-const VERSION = '0.13.0-alpha';
+const VERSION = '0.14.0-alpha';
 const CACHE = `bcb-v${VERSION}`;
 
 const SHELL = [

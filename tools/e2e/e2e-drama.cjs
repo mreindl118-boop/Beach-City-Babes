@@ -65,6 +65,7 @@ function edit(page, fn) {
     const c = S.npcs.find(n => n.id === S.activeId);
     c.affection = 60; c.desire = 30; c.relStyle = 'mono'; c.agreement = 'none';
     c.pendingConfront = false; c.pendingCheatConfess = false; c.pendingDTR = false;
+    c.pendingPriority = false; c.pendingReconcile = false; c.jealousy = 0; c.estranged = false;
     c.attractedTo = ['woman','man','enby']; c.mood = 1; c.guilt = 0; c.suspicion = 0;
   `);
   await loadSlot(page);
@@ -145,6 +146,8 @@ function edit(page, fn) {
     S.activeId = a.id;
     a.relStyle = 'poly'; a.agreement = 'open'; a.affection = 50; a.mood = 1;
     a.attractedTo = ['woman','man','enby']; a.pendingConfront = false; a.pendingDTR = false; a.pendingCheatConfess = false;
+    a.pendingPriority = false; a.pendingReconcile = false; a.jealousy = 0; a.estranged = false;
+    b.pendingPriority = false; b.pendingReconcile = false; b.jealousy = 0; b.estranged = false;
     b.relStyle = 'poly'; b.agreement = 'open'; b.affection = 40; b.mood = 1;
     b.attractedTo = ['woman','man','enby']; b.gender = 'woman'; b.pendingConfront = false; b.pendingDTR = false;
     a.chem = {}; a.chem[b.id] = true; b.chem = {}; b.chem[a.id] = true;
@@ -221,6 +224,7 @@ function edit(page, fn) {
     a.agreement = 'exclusive'; a.mood = 2; a.standards = 0.4; a.warnings = 0;
     a.attractedTo = ['woman','man','enby'];
     a.pendingDTR = false; a.pendingConfront = false; a.pendingCheatConfess = false;
+    a.pendingPriority = false; a.pendingReconcile = false; a.jealousy = 0; a.estranged = false;
     S.player.condoms = 6; S.player.location = 'home'; S.player.hour = 22; S.player.reputation = 20;
     localStorage.setItem('bcb_slot_1', JSON.stringify(S));
   });
@@ -261,7 +265,106 @@ function edit(page, fn) {
     await page.screenshot({ path: `${SHOT}/d9-clinic.png` });
   }
 
+  // --- 10. Jealousy → priority scene (reassure clears it) ---
+  await edit(page, `
+    const c = S.npcs.find(n => n.id === S.activeId);
+    c.affection = 55; c.desire = 30; c.relStyle = 'mono'; c.agreement = 'none';
+    c.attractedTo = ['woman','man','enby']; c.mood = 0; c.jealousy = 4; c.reassured = 0;
+    c.pendingPriority = true; c.pendingConfront = false; c.pendingCheatConfess = false;
+    c.pendingDTR = false; c.pendingReconcile = false; c.rival = null;
+  `);
+  await loadSlot(page);
+  await page.waitForSelector('[data-scene="reassure"]', { timeout: 5000 });
+  await page.screenshot({ path: `${SHOT}/d10-jealous.png` });
+  await page.click('[data-scene="reassure"]');
+  await page.waitForTimeout(600);
+  let js = await page.evaluate(() => {
+    const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return S.npcs.find(n => n.id === S.activeId);
+  });
+  if (js.pendingPriority) errors.push('Priority: pendingPriority not cleared');
+  if (!(js.jealousy < 4)) errors.push('Priority: reassure did not lower jealousy, got ' + js.jealousy);
+
+  // --- 11. Rival love-triangle escalates to a them-or-me ultimatum ---
+  await edit(page, `
+    const [a, b] = S.npcs;
+    S.activeId = a.id;
+    a.affection = 70; a.desire = 40; a.relStyle = 'mono'; a.agreement = 'none';
+    a.attractedTo = ['woman','man','enby']; a.mood = 0; a.jealousy = 7;
+    a.pendingPriority = true; a.pendingConfront = false; a.pendingCheatConfess = false;
+    a.pendingDTR = false; a.pendingReconcile = false; a.rival = b.id;
+    b.name = b.name || 'Rival';
+  `);
+  await loadSlot(page);
+  // boiling jealousy + a rival → the ultimatum choices appear
+  await page.waitForSelector('[data-scene="them"], [data-scene="free"]', { timeout: 5000 });
+  await page.screenshot({ path: `${SHOT}/d11-rival.png` });
+  await page.click('[data-scene="them"]');
+  await page.waitForTimeout(600);
+  js = await page.evaluate(() => {
+    const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    const a = S.npcs.find(n => n.id === S.activeId);
+    return { jealousy: a.jealousy, pending: a.pendingPriority };
+  });
+  if (js.pending) errors.push('Rival ultimatum: pendingPriority not cleared');
+  if (js.jealousy !== 0) errors.push('Rival ultimatum: jealousy not reset after choosing them, got ' + js.jealousy);
+
+  // --- 12. Reconciliation: estranged ex warms up → second-chance scene ---
+  await edit(page, `
+    const c = S.npcs.find(n => n.id === S.activeId);
+    c.estranged = true; c.betrayed = true; c.affection = 32; c.mood = 0; c.desire = 20;
+    c.attractedTo = ['woman','man','enby'];
+    c.pendingReconcile = true; c.pendingPriority = false; c.pendingConfront = false;
+    c.pendingCheatConfess = false; c.pendingDTR = false;
+  `);
+  await loadSlot(page);
+  await page.waitForSelector('[data-scene="own"]', { timeout: 5000 });
+  await page.screenshot({ path: `${SHOT}/d12-reconcile.png` });
+  await page.click('[data-scene="own"]');
+  await page.waitForTimeout(600);
+  js = await page.evaluate(() => {
+    const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return S.npcs.find(n => n.id === S.activeId);
+  });
+  if (js.estranged || js.pendingReconcile) errors.push('Reconcile: estrangement not cleared after owning it');
+  if (!(js.affection >= 40)) errors.push('Reconcile: owning it did not restore affection, got ' + js.affection);
+
+  // --- 13. Unlimited texting: send 8 texts to a faraway NPC, none blocked ---
+  // (set state directly — edit() force-co-locates the active NPC, which we DON'T want)
+  const farId2 = await page.evaluate(() => {
+    const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    const c = S.npcs.find(n => n.id === S.activeId);
+    c.schedule = {}; ['dawn','morning','afternoon','evening','night','late'].forEach(p => c.schedule[p] = 'club');
+    S.player.location = 'beach'; S.player.hour = 12; S.player.textStreak = {}; S.player.textsSent = {};
+    c.walkedToday = false; c.affection = 40; c.desire = 30; c.attractedTo = ['woman','man','enby'];
+    localStorage.setItem('bcb_slot_1', JSON.stringify(S));
+    return c.id;
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('[data-load="1"]');
+  await page.waitForTimeout(400);
+  await page.click('[data-action="roster"]');
+  await page.waitForSelector('[data-npc]');
+  await page.click(`[data-npc="${farId2}"]`);
+  await page.waitForTimeout(400);
+  let sent = 0;
+  for (let i = 0; i < 8; i++) {
+    const disabled = await page.$eval('#chat-input', el => el.disabled).catch(() => true);
+    if (disabled) break;
+    await page.fill('#chat-input', 'hey thinking about you ' + i);
+    await page.click('#chat-send');
+    await page.waitForTimeout(500);
+    sent++;
+  }
+  if (sent < 8) errors.push('Unlimited texting: blocked after ' + sent + ' texts (expected 8)');
+  const bubbles = await page.evaluate((id) => {
+    const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return (S.logs[id] || []).filter(e => e.who === 'me').length;
+  }, farId2);
+  if (!(bubbles >= 8)) errors.push('Unlimited texting: not all 8 texts logged, got ' + bubbles);
+  await page.screenshot({ path: `${SHOT}/d13-unlimited.png` });
+
   await browser.close();
   if (errors.length) { console.log('DRAMA ERRORS:\n' + errors.join('\n')); process.exit(1); }
-  console.log('DRAMA E2E PASS — DTR, confront, ultimatum, stray, group hangout, migration');
+  console.log('DRAMA E2E PASS — DTR, confront, ultimatum, stray, group, migration, jealousy/priority, rival ultimatum, reconcile, unlimited texting');
 })().catch(e => { console.error('FATAL', e); process.exit(1); });

@@ -30,6 +30,8 @@ import {
   dtrOpen, DTR_CHOICES, resolveDTR,
   confrontOpen, CONFRONT_CHOICES, resolveConfront, resolveUltimatum,
   strayOpen, STRAY_CHOICES, resolveStray, groupAfterline,
+  jealousOpen, PRIORITY_CHOICES, resolvePriority, rivalUltimatumOpen,
+  reconcileOpen, RECONCILE_CHOICES, resolveReconcile, jealousText,
 } from './dialogue.js';
 import { VERSION, BUILD } from './version.js';
 
@@ -124,6 +126,10 @@ function migrate(data) {
   p.std ??= null;
   p.stdKnown ??= false;
   p.tired ??= false;
+  for (const c of data.npcs ?? []) {
+    c.jealousy ??= 0; c.reassured ??= 0; c.rival ??= null; c.estranged ??= false;
+    c.pendingPriority ??= false; c.pendingReconcile ??= false;
+  }
   // the town grew: old saves meet the new faces too
   if ((data.npcs?.length ?? 0) < 6) {
     const used = new Set([...(data.usedNames || []), p.name]);
@@ -379,6 +385,7 @@ function renderChar(forcePortrait = false) {
     c.known.rel ? `<span class="chip mini rel">${REL_LABELS[c.relStyle].chip}</span>` : '',
     c.agreement !== 'none' ? `<span class="chip mini agree">${AGREEMENT_LABELS[c.agreement]}</span>` : '',
     c.known.type && !interested ? `<span class="chip mini friend">friends 🤝</span>` : '',
+    (c.jealousy ?? 0) >= 3 && interested ? `<span class="chip mini jealous">💢 jealous${rivalNameFor(c) ? ' of ' + rivalNameFor(c) : ''}</span>` : '',
   ].join('');
 
   // relationship-tier track — a clear "where are we heading" ladder
@@ -628,6 +635,10 @@ function registerRomance(withC, pub = 0.3, extraIds = []) {
       t >= 2; // dating-but-undefined still stings, poly included (they hate sneaking)
     if (!cares) continue;
     y.guilt = (y.guilt ?? 0) + 1;
+    // jealousy is broader than guilt: anyone into you who isn't openly poly
+    // starts to sting when you're romancing others
+    if (isInterested(y, playerForDialogue()) && tierFor(y) >= 1)
+      y.jealousy = (y.jealousy ?? 0) + (y.relStyle === 'poly' ? 0.4 : 1) * (1 + pub);
     const p = Math.min(0.5, (0.10 + 0.18 * pub) * (1 + 0.05 * Math.max(0, S.npcs.length - 2)));
     if (rng.chance(p) && !y.pendingConfront) {
       y.suspicion = (y.suspicion ?? 0) + 1;
@@ -640,6 +651,17 @@ function registerRomance(withC, pub = 0.3, extraIds = []) {
     }
   }
   flushTextsBadge();
+}
+
+// Love triangles: two people who both want you and both know it become rivals.
+function computeRivals() {
+  const flames = S.npcs.filter(c => tierFor(c) >= 2 && isInterested(c, playerForDialogue()));
+  for (const c of S.npcs) {
+    if (!flames.includes(c)) { c.rival = null; continue; }
+    const other = flames.filter(o => o.id !== c.id).sort((a, b) => b.affection - a.affection)[0];
+    c.rival = other ? other.id : null;
+    if (other && c.relStyle === 'mono') c.jealousy = (c.jealousy ?? 0) + 0.5;
+  }
 }
 
 // Public blowups echo: friends warn each other about you.
@@ -663,8 +685,75 @@ function warnOthers(about) {
 function maybeScene(c) {
   if (c.pendingConfront) return sceneConfront(c);
   if (c.pendingCheatConfess) return sceneStray(c);
+  if (c.pendingReconcile) return sceneReconcile(c);
+  if (c.pendingPriority) return scenePriority(c);
   if (c.pendingDTR) return sceneDTR(c, true);
   return false;
+}
+
+// The name of this NPC's rival (a specific other flame), or null.
+function rivalNameFor(c) {
+  const r = c.rival && S.npcs.find(n => n.id === c.rival);
+  return r ? r.name : null;
+}
+
+// "Where do I stand?" — softer than a cheating confrontation. Escalates to a
+// them-or-me ultimatum when a rival is in the picture and jealousy has boiled.
+function scenePriority(c) {
+  c.pendingPriority = false;
+  const rival = rivalNameFor(c);
+  const boiling = (c.jealousy ?? 0) >= 6 && rival;
+  if (boiling) {
+    npcSay(rivalUltimatumOpen(c, playerForDialogue(), rng, rival));
+    presentChoices([
+      { id: 'them', label: `💘 “It’s you, ${c.name}.”` },
+      { id: 'free', label: `🕊️ “I won't be forced to choose.”` },
+    ], sub => {
+      const u = resolveUltimatum(c, playerForDialogue(), sub === 'them', rng);
+      c.jealousy = 0;
+      applyDelta(c, u.dAff, u.dDes);
+      npcSay(u.npcText);
+      if (sub === 'them') {
+        for (const y of S.npcs) {
+          if (y.id === c.id) continue;
+          if (y.agreement !== 'none' || y.partner || tierFor(y) >= 2) {
+            y.agreement = 'none'; y.partner = false;
+            y.affection = Math.max(0, y.affection - 15); y.mood = Math.max(-2, y.mood - 1);
+            y.guilt = 0; y.suspicion = 0; y.jealousy = 0; y.pendingConfront = false;
+            S.texts.push({ npcId: y.id, read: false, day: S.player.day,
+              text: `So it's ${c.name}. Thanks for telling me. Be good to each other. 💔` });
+          }
+        }
+        flushTextsBadge();
+      } else {
+        warnOthers(c); c.estranged = true;
+      }
+      afterAction(u.emotion, sub === 'them');
+    });
+    return true;
+  }
+  npcSay(jealousOpen(c, playerForDialogue(), rng, rival));
+  presentChoices(PRIORITY_CHOICES, choice => {
+    const r = resolvePriority(c, playerForDialogue(), choice, rng, rival);
+    applyDelta(c, r.dAff, r.dDes);
+    npcSay(r.npcText);
+    if (r.walk) c.walkedToday = true;
+    afterAction(r.emotion, choice === 'reassure' || (choice === 'honest' && c.relStyle === 'poly'));
+  });
+  return true;
+}
+
+// A second chance, earned by sustained kindness after a breakup.
+function sceneReconcile(c) {
+  c.pendingReconcile = false;
+  npcSay(reconcileOpen(c, playerForDialogue(), rng));
+  presentChoices(RECONCILE_CHOICES, choice => {
+    const r = resolveReconcile(c, playerForDialogue(), choice, rng);
+    applyDelta(c, r.dAff, r.dDes);
+    npcSay(r.npcText);
+    afterAction(r.emotion, choice === 'own');
+  });
+  return true;
 }
 
 // Show scene choices as buttons AND register them so the player can type an
@@ -710,7 +799,7 @@ function sceneConfront(c, preemptive = false) {
           }
           flushTextsBadge();
         } else {
-          warnOthers(c);
+          warnOthers(c); c.estranged = true; // door left open for a comeback
         }
         afterAction(u.emotion, sub === 'them');
       });
@@ -986,6 +1075,10 @@ async function npcReply(c, text, { texting = false } = {}) {
         day: S.player.day,
       };
       const persona = chatPersona(c, pl, recent, world);
+      if ((c.jealousy ?? 0) >= 3) {
+        const rn = rivalNameFor(c);
+        persona.jealousNote = `You've been feeling insecure lately${rn ? ` — especially about ${rn}` : ''}; some quiet jealousy colors your replies, though you don't necessarily lead with it.`;
+      }
       if (texting) persona.channel = 'text';
       const out = await prov(texting ? `📱 ${text}` : text, persona, { tier: tierFor(c) });
       if (out && typeof out === 'string') r.npcText = out.trim().replace(/^📱\s*/, '');
@@ -1600,8 +1693,10 @@ function doSleep() {
   if (S.player.tired) { S.player.tired = false; narrate('\u2600\uFE0F A real night\u2019s sleep. You feel human again.'); }
   const pl = playerForDialogue();
   const dated = S.npcs.filter(c => c._datedToday).map(c => c.id);
+  computeRivals();
   for (const c of S.npcs) {
     const neglected = dailyTick(c, S.player.day, rng, pl);
+    if (!dated.includes(c.id)) c.jealousy = Math.max(0, (c.jealousy ?? 0) - 0.5);
     delete c._datedToday;
     c.walkedToday = false; c.warnings = 0; // patience resets with the sunrise
     const tier = tierFor(c);
@@ -1616,6 +1711,19 @@ function doSleep() {
         && !c.pendingCheatConfess && rng.chance(0.3)) {
       c.pendingCheatConfess = true;
       S.texts.push({ npcId: c.id, read: false, day: S.player.day, text: 'Can we talk? It’s important. I’d rather say it to your face. 🥺' });
+    }
+    // jealousy boils over → a "where do I stand?" scene, teased by a text first
+    if ((c.jealousy ?? 0) >= 4 && isInterested(c, pl) && !c.pendingPriority
+        && !c.pendingConfront && !c.pendingCheatConfess && !c.pendingReconcile) {
+      c.pendingPriority = true;
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day,
+        text: jealousText(c, pl, rng, rivalNameFor(c)) });
+    }
+    // an estranged ex warms up under sustained kindness → a reconcile scene
+    if (c.estranged && !c.pendingReconcile && c.affection >= 28 && c.mood >= 0 && rng.chance(0.6)) {
+      c.pendingReconcile = true;
+      S.texts.push({ npcId: c.id, read: false, day: S.player.day,
+        text: 'I… have been thinking about you. Ugh. Come find me? We should talk. 🥺' });
     }
     // proactive texting — but strangers don't have your number
     if (!hasMet(c)) continue;
@@ -2001,6 +2109,7 @@ function personaSystemPrompt(persona) {
       ? 'You ARE romantically/sexually interested in them — attraction that grows with real chemistry.'
       : 'You are NOT romantically interested — keep it warmly friendly and deflect flirting kindly.',
     persona.desireHint ? `Something you currently want (drop hints, don't demand): "${persona.desireHint}"` : '',
+    persona.jealousNote || '',
     persona.turnoffs?.length ? `Instant turn-offs for you: ${persona.turnoffs.join(', ')}.` : '',
     persona.playerTired ? `${persona.playerName} looks visibly exhausted right now — sleep-deprived. You notice, and it colors your reaction (tease them, worry about them, or find it a little less attractive — your call).` : '',
     ['evening', 'night', 'late'].includes(w.phase) ? 'It\'s after dark and the whole town runs bolder — flirtation lands easier at this hour.' : '',

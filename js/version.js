@@ -1,4 +1,4 @@
 // Single source of truth for the app version (mirrored in version.json + sw.js
 // by tools/bump_version.py — run it for every release).
-export const VERSION = '0.13.0-alpha';
-export const BUILD = 18;
+export const VERSION = '0.14.0-alpha';
+export const BUILD = 19;

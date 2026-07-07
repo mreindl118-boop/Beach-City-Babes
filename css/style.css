@@ -629,3 +629,6 @@ body.night { background: linear-gradient(200deg, #3a2a6b, #5b2f7a 55%, #241a44);
 }
 .heat-pips { font-size: 10px; letter-spacing: -2px; line-height: 1; }
 .heat-pips .pip-dim { filter: grayscale(1); opacity: 0.28; }
+
+/* jealousy / drama chip */
+.chip.mini.jealous { background: #ffe0e0; color: #b3261e; font-weight: 800; }

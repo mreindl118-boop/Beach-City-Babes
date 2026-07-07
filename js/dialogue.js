@@ -1188,3 +1188,142 @@ export function reputationLabel(rep) {
   if (rep < 40) return { txt: 'Well-liked', emoji: '😊' };
   return { txt: 'Beach Royalty', emoji: '👑' };
 }
+
+// ================= deeper drama: jealousy, rivalry, priority, reconciliation =================
+// Jealousy is softer than a cheating confrontation: nobody caught you breaking
+// a promise, they just feel you slipping toward someone else and want to know
+// where they stand. A rival (a specific named other flame) sharpens it.
+
+export function jealousOpen(c, player, rng, rivalName = null) {
+  const ctx = ctxFor(c, player, rng, { rival: rivalName || 'someone' });
+  const banks = rivalName
+    ? (c.relStyle === 'mono' ? [
+        'So. {rival}. *taps phone* I’m not blind, {player}. Am I competing for you now? Because I don’t audition.',
+        'Funny — half the beach saw you with {rival}. I really like you, which is exactly why I need to know if I’m wasting my summer.',
+      ] : [
+        'I saw you and {rival}. I’m poly, so it’s not the *other person* that gets me — it’s not knowing where I rank. Talk to me.',
+        '{rival}, huh? Cute. I don’t do jealousy, but I do do honesty. So: what am I to you, really?',
+      ])
+    : (c.relStyle === 'mono' ? [
+        'Can I be needy for a sec? I keep feeling you drift and I hate it. Am I making this up, or am I not your person?',
+        '*deep breath* I’m not usually like this, but — you’ve been everywhere but here. Do you actually want this, {pet}?',
+      ] : [
+        'Hey — no drama, just a check-in: I feel like I’m at the back of your line lately. Where do I actually stand?',
+        'I don’t need to be your only. I do need to not feel like an afterthought. Am I one, {player}?',
+      ]);
+  return fill(rng.pick(banks), ctx);
+}
+
+export const PRIORITY_CHOICES = [
+  { id: 'reassure', label: '💖 “You matter to me. A lot.”' },
+  { id: 'honest',   label: '🫶 “I’m seeing a few people — honestly.”' },
+  { id: 'dismiss',  label: '🙄 “Don’t be so dramatic.”' },
+];
+
+export function resolvePriority(c, player, choice, rng, rivalName = null) {
+  const ctx = ctxFor(c, player, rng, { rival: rivalName || 'them' });
+  c.pendingPriority = false;
+  if (choice === 'reassure') {
+    // words are cheap: it lands NOW, but they'll notice if actions don't follow
+    c.jealousy = Math.max(0, (c.jealousy ?? 0) - 3);
+    c.reassured = (c.reassured ?? 0) + 1;
+    const hollow = c.reassured >= 3 && c.mood < 1;
+    if (hollow) {
+      c.mood = Math.max(-2, c.mood - 1);
+      return { dAff: -4, dDes: 0, emotion: 'sad', npcText: fill(rng.pick([
+        'You always say that. *small, tired smile* Words are easy, {pet}. Show me sometime.',
+        'Mm. That’s the third time I’ve heard that this week. I want to believe you. Help me.',
+      ]), ctx) };
+    }
+    return { dAff: 6, dDes: 2, emotion: 'love', npcText: fill(rng.pick([
+      '*exhales* Okay. Okay, good. I needed that. Sorry for the wobble — come here.',
+      'That’s all I wanted to hear. *pulls you in* Don’t make a liar of yourself, though. 💛',
+    ]), ctx) };
+  }
+  if (choice === 'honest') {
+    c.jealousy = Math.max(0, (c.jealousy ?? 0) - 1);
+    if (c.relStyle === 'poly') {
+      c.mood = Math.min(2, c.mood + 1);
+      return { dAff: 8, dDes: 3, emotion: 'happy', npcText: fill(rng.pick([
+        'THANK you. See, that’s all I ever want — the truth. I can share you; I can’t share a liar. We’re good, {pet}.',
+        '*visibly relaxes* Honesty tax paid in full. That’s the whole game to me. Carry on, gorgeous — just keep telling me.',
+      ]), ctx) };
+    }
+    c.mood = Math.max(-2, c.mood - 1);
+    return { dAff: -8, dDes: -2, emotion: 'sad', npcText: fill(rng.pick([
+      '...I appreciate the honesty. I hate the answer, but I appreciate it. I’m a one-person heart, {player}. I have to think.',
+      'At least you said it to my face. That’s more than most. But I don’t want a fraction of somebody. Give me some space.',
+    ]), ctx) };
+  }
+  // dismiss — the worst possible read of a vulnerable moment
+  c.jealousy = (c.jealousy ?? 0) + 2;
+  c.mood = -2;
+  return { dAff: -12, dDes: -4, emotion: 'annoyed', walk: true, npcText: fill(rng.pick([
+    'Dramatic. Right. I open up and I’m *dramatic*. Cool. Forget I asked. *leaves*',
+    'Wow. Noted. Sorry for having a feeling near you. Don’t follow me.',
+  ]), ctx) };
+}
+
+// A rival flame's escalation to a "them or me" once jealousy boils over.
+export function rivalUltimatumOpen(c, player, rng, rivalName) {
+  const ctx = ctxFor(c, player, rng, { rival: rivalName });
+  return fill(rng.pick([
+    'Okay, I’m done floating. It’s me or {rival}. I’m not asking to be cruel — I’m asking because I have some self-respect. Choose.',
+    '*arms crossed, chin up* {rival} or me. I know what I want. Do you?',
+  ]), ctx);
+}
+
+// Reconciliation: sustained kindness after a breakup can earn a second chance.
+export function reconcileOpen(c, player, rng) {
+  const ctx = ctxFor(c, player, rng);
+  return fill(rng.pick([
+    '*finds you at the water* I wasn’t going to come. But you’ve been… different. Kinder. So talk. Give me a reason to try again.',
+    'I keep re-reading your texts, which is humiliating. Fine. One conversation. Convince me we’re worth a second draft, {player}.',
+  ]), ctx);
+}
+
+export const RECONCILE_CHOICES = [
+  { id: 'own',    label: '🙇 “I messed up. You deserved better. I’ll show you.”' },
+  { id: 'charm',  label: '😏 “Missed me? I knew you would.”' },
+  { id: 'walk',   label: '🚪 “Maybe we’re better apart.”' },
+];
+
+export function resolveReconcile(c, player, choice, rng) {
+  const ctx = ctxFor(c, player, rng);
+  c.pendingReconcile = false; c.estranged = false;
+  if (choice === 'own') {
+    c.mood = 1; c.betrayed = false; c.strikes = (c.strikes ?? 0);
+    c.affection = Math.max(c.affection, 40);
+    addMemory(c, 'the apology that actually meant it');
+    return { dAff: 20, dDes: 6, emotion: 'love', npcText: fill(rng.pick([
+      '*eyes shining, furious about it* …Damn you. Okay. Second chance. ONE. Break it and I’m gone for real, {pet}.',
+      'That’s the person I fell for. C’mere. We start clean — but I’m keeping my guard up a while.',
+    ]), ctx) };
+  }
+  if (choice === 'charm') {
+    c.mood = Math.max(-2, c.mood - 1);
+    c.estranged = true; c.pendingReconcile = false;
+    return { dAff: -6, dDes: 0, emotion: 'annoyed', npcText: fill(rng.pick([
+      'Wow. Same smirk that got us here. No. Try being a person, not a pickup line.',
+      '*stands up* That’s a no. Come back when you can say sorry without winking.',
+    ]), ctx) };
+  }
+  c.estranged = false; c.betrayed = true;
+  return { dAff: -2, dDes: 0, emotion: 'sad', npcText: fill(rng.pick([
+    'Yeah. Yeah, maybe we are. Thanks for being honest this time. Take care of yourself, {player}.',
+    'Okay. Clean ending, then. No hard feelings — mostly. Bye, {pet}.',
+  ]), ctx) };
+}
+
+// Proactive jealous/pining text lines (used by the daily simulation).
+export function jealousText(c, player, rng, rivalName = null) {
+  const ctx = ctxFor(c, player, rng, { rival: rivalName || 'whoever that was' });
+  const banks = rivalName ? [
+    'So who’s {rival}? Asking for me. Just me. 🙃',
+    'Saw the pics. {rival} seems… fun. We should talk. 📱',
+  ] : [
+    'You’ve been quiet. Too quiet. Everything okay with us? 🥺',
+    'Not to be That Person, but… do you still like me? Genuine question. 💭',
+  ];
+  return fill(rng.pick(banks), ctx);
+}

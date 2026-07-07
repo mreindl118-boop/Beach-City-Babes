@@ -49,6 +49,15 @@ consenting.
   exclusive partners may stray and tearfully confess (forgive or walk).
   Mutually-sparked poly metamours unlock **group hangouts** — and no, poly
   NPCs aren't automatically into each other; chemistry is rolled and remembered.
+- **Jealousy, rivals, and second chances.** Romancing others while someone's
+  into you builds their **jealousy** — insecure texts, then a "where do I
+  actually stand?" heart-to-heart (reassure, be honest, or dismiss them and
+  pay for it; empty reassurances wear thin). When two Dating-tier flames both
+  want you they become **named rivals** (you'll see *💢 jealous of ___*),
+  jealousy sharpens, and it can boil over into a live **them-or-me** ultimatum.
+  A scorched breakup isn't always the end: keep it kind over the following days
+  and an estranged ex may text you back for a **reconciliation** — own it and
+  mean it to earn the second chance.
 - **Sticker-Pop art.** Portraits are die-cut sticker cartoons: white outer
   stroke around the silhouette, thick warm-brown outlines, flat cel shading,
   two-tone hair melting from dark roots into a vivid accent color that also
