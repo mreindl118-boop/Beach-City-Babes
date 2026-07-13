@@ -111,6 +111,8 @@ export function generateCharacter(rng, usedNames = new Set()) {
     giftsToday: 0,
     partner: false,
     inbox: [],
+    bonds: [],                 // NPC-to-NPC relationships (filled by generateWeb)
+    voice: generateVoice(rng), // persistent distinct texting voice
   };
 }
 
@@ -252,4 +254,106 @@ export function dailyTick(c, day, rng, player) {
   if (!c.currentDesire || rng.chance(0.4)) rollDesire(c, rng);
   clampStats(c, player);
   return neglected;
+}
+
+// ================= rich voice models — every NPC texts like a distinct person =================
+// A persistent voice profile: not just an archetype label but concrete texting
+// habits, a passion, a value, and a soft insecurity. Fed to the chat model so
+// no two people sound alike over text.
+const VOICE_TRAITS = ['deadpan', 'earnest', 'chaotic', 'guarded', 'bubbly', 'sardonic',
+  'intense', 'breezy', 'dramatic', 'soft-spoken', 'cocky', 'feral', 'poetic', 'blunt',
+  'nerdy', 'sultry', 'goofy', 'anxious-rambler', 'unbothered', 'theatrical'];
+const EMOJI_STYLE = ['none', 'sparse', 'sprinkled', 'heavy'];
+const MSG_LENGTH = ['clipped one-liners', 'normal', 'run-on rambles', 'multi-text bursts'];
+const CASING = ['all-lowercase', 'normal caps', 'Emphatic CAPS for stress'];
+const PUNCT = ['trails off in ellipses…', 'exclaims!! a lot!!', 'dry, no punctuation', 'perfect grammar, always'];
+const SPEECH_TICS = ['calls people "babe" or "hon"', 'overuses the word "literally"',
+  'ends texts with "lol" even when nothing is funny', 'quotes movies constantly',
+  'answers questions with questions', 'sends "…" then a second text', 'uses old-timey slang',
+  'makes up pet names for you', 'types "sooo" and "omg" a lot', 'is weirdly formal for a beach',
+  'drops song lyrics into conversation', 'rates everything out of ten'];
+const VALUES = ['loyalty above everything', 'never being bored', 'being seen for their mind',
+  'their freedom', 'brutal honesty', 'ambition and hustle', 'plain kindness',
+  'being authentically weird', 'adventure', 'a calm, steady life'];
+const INSECURITIES = ['being seen as just a pretty face', 'not feeling smart enough',
+  'being "too much" for people', 'getting left behind', 'never being someone’s first choice',
+  'their messy past', 'being fundamentally boring', 'people leaving once they really know them'];
+const PASSIONS = ['vintage synths', 'competitive baking', 'tide-pool marine life',
+  'conspiracy podcasts', 'restoring their motorcycle', 'painting tiny detailed things',
+  'free diving', 'writing terrible earnest poetry', 'thrifting for treasure', 'reading birth charts',
+  'doorstop fantasy novels', 'street photography', 'making the perfect playlist', 'competitive gaming'];
+
+export function generateVoice(rng) {
+  return {
+    traits: rng.shuffle([...VOICE_TRAITS]).slice(0, 2),
+    emoji: rng.pick(EMOJI_STYLE),
+    length: rng.pick(MSG_LENGTH),
+    casing: rng.pick(CASING),
+    punct: rng.pick(PUNCT),
+    tics: rng.shuffle([...SPEECH_TICS]).slice(0, rng.chance(0.4) ? 2 : 1),
+    value: rng.pick(VALUES),
+    insecurity: rng.pick(INSECURITIES),
+    passion: rng.pick(PASSIONS),
+  };
+}
+
+// Concrete prompt directives that make the voice audible in generated text.
+export function voiceDirectives(v) {
+  if (!v) return [];
+  return [
+    `Core vibe: ${v.traits.join(', ')}.`,
+    `Texting style: ${v.casing}, ${v.length}, ${v.emoji} emoji, ${v.punct}. Speech habits: ${v.tics.join('; ')}. Let this shape HOW you type, consistently.`,
+    `You light up talking about ${v.passion}.`,
+    `Deep down you value ${v.value}.`,
+    `Quietly insecure about ${v.insecurity} — never volunteer it, but it colors how you react to slights or distance.`,
+  ];
+}
+
+// ================= NPC-to-NPC relationship web =================
+// The town is connected before the player arrives: couples, exes, best friends,
+// rivals, siblings. Bonds are bidirectional and drive gossip + targeted drama.
+const BOND_LABEL = {
+  dating: { chip: '💞 dating {n}', gossip: 'is dating' },
+  ex: { chip: '💔 {n}’s ex', gossip: 'used to date' },
+  bestie: { chip: '👯 {n}’s bestie', gossip: 'is best friends with' },
+  rival: { chip: '😾 feuds with {n}', gossip: 'has beef with' },
+  sibling: { chip: '🧬 {n}’s sibling', gossip: 'is the sibling of' },
+};
+
+function addBond(a, b, type) {
+  (a.bonds ??= []).push({ id: b.id, name: b.name, type });
+  (b.bonds ??= []).push({ id: a.id, name: a.name, type });
+}
+
+// Wire a cast of NPCs together. Sparse and sensible: a couple or two, some
+// exes, a few friendships, maybe a feud. Each NPC keeps a `bonds` array.
+export function generateWeb(npcs, rng) {
+  for (const c of npcs) c.bonds = [];
+  const pool = rng.shuffle([...npcs]);
+  const taken = new Set(); // ids already in a romantic bond (keep it uncrowded)
+  const pair = (type, want) => {
+    let made = 0;
+    for (let i = 0; i + 1 < pool.length && made < want; i += 2) {
+      const a = pool[i], b = pool[i + 1];
+      if (a.id === b.id) continue;
+      if ((type === 'dating' || type === 'ex') && (taken.has(a.id) || taken.has(b.id))) continue;
+      if (a.bonds.some(x => x.id === b.id)) continue;
+      addBond(a, b, type);
+      if (type === 'dating' || type === 'ex') { taken.add(a.id); taken.add(b.id); }
+      made++;
+    }
+  };
+  if (npcs.length >= 4) pair('dating', rng.int(0, 1));
+  pair('ex', rng.int(1, 2));
+  pair('bestie', rng.int(1, 2));
+  if (npcs.length >= 5) pair('rival', rng.chance(0.6) ? 1 : 0);
+  if (npcs.length >= 6) pair('sibling', rng.chance(0.4) ? 1 : 0);
+  return npcs;
+}
+
+export function bondChip(bond) {
+  return (BOND_LABEL[bond.type]?.chip || '{n}').replace('{n}', bond.name);
+}
+export function bondGossip(bond) {
+  return BOND_LABEL[bond.type]?.gossip || 'knows';
 }

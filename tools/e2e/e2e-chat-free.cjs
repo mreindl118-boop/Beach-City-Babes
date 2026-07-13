@@ -54,6 +54,10 @@ const errors = [];
   for (const need of ['Beach City', 'Personality', 'Job:', 'mood', 'CONVERSATION RULES', 'TONE CEILING']) {
     if (!sys.includes(need)) errors.push(`system prompt missing "${need}"`);
   }
+  // rich voice model must reach the model — distinct texting persona
+  for (const need of ['Core vibe:', 'Texting style:', 'You light up talking about', 'Deep down you value', 'Quietly insecure about']) {
+    if (!sys.includes(need)) errors.push(`voice model missing from prompt: "${need}"`);
+  }
   if (!calls[0].messages.some(m => m.role === 'user')) errors.push('no user message sent');
 
   // 3. continuity: second message must include the first exchange as history

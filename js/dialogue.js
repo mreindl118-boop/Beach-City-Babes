@@ -1126,6 +1126,8 @@ export function chatPersona(c, player, recentLog, world = {}) {
     boldness: c.boldness, libido: c.libido,
     affection: c.affection, desire: c.desire,
     playerTired: !!player.tired,
+    voice: c.voice || null,
+    bonds: (c.bonds || []).map(b => ({ name: b.name, type: b.type })),
     world, // { location, phase, day } — where this conversation is happening
     recent: recentLog,
     style: 'Reply in first person as this character. Flirty, witty, with real boundaries — you are NOT a pushover and reject moves that are creepy, boring, or too fast. Keep it suggestive, never sexually explicit. 1-3 sentences.',

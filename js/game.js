@@ -12,6 +12,7 @@ import {
   generateCharacter, archetypeOf, quirkOf, pronounsOf, isInterested,
   clampStats, dailyTick, rollDesire, currentDesireOf, ebbDesire,
   npcChemistry, ensureMeasurements, ACCENTS,
+  generateWeb, generateVoice, voiceDirectives, bondChip, bondGossip,
 } from './characters.js';
 import {
   portraitSVG, setEmotion, emotionFor, heartBurst, heatLevel,
@@ -59,6 +60,7 @@ function newState(playerDef, slot) {
   const usedNames = new Set([playerDef.name]);
   const npcs = Array.from({ length: 6 }, () => generateCharacter(rng, usedNames));
   npcs.forEach(c => rollDesire(c, rng));
+  generateWeb(npcs, rng); // wire the town together before the player arrives
   const worldSeed = rng.int(1, 1_000_000_000);
   npcs.forEach(c => ensureSchedule(c, worldSeed));
   // start the day co-located with someone, so the first encounter just happens
@@ -129,7 +131,15 @@ function migrate(data) {
   for (const c of data.npcs ?? []) {
     c.jealousy ??= 0; c.reassured ??= 0; c.rival ??= null; c.estranged ??= false;
     c.pendingPriority ??= false; c.pendingReconcile ??= false;
+    c.voice ??= generateVoice(new RNG((hashStr(c.id) ^ 0x5f3759df) >>> 0)); // stable per character
   }
+  // relationship web: build it once for saves from before the web existed
+  if ((data.npcs || []).some(c => !Array.isArray(c.bonds) || c.bonds.length === undefined)
+      || (data.npcs || []).every(c => !(c.bonds && c.bonds.length))) {
+    if ((data.npcs || []).every(c => !(c.bonds && c.bonds.length)))
+      generateWeb(data.npcs || [], new RNG((data.worldSeed ^ 0x9e3779b9) >>> 0));
+  }
+  for (const c of data.npcs ?? []) c.bonds ??= [];
   // the town grew: old saves meet the new faces too
   if ((data.npcs?.length ?? 0) < 6) {
     const used = new Set([...(data.usedNames || []), p.name]);
@@ -411,6 +421,8 @@ function renderChar(forcePortrait = false) {
   facts.push(c.known.quirk ? `⭐ ${quirkOf(c).text}` : '⭐ ???');
   facts.push(c.known.type ? '💘 pansexual — into people, not genders' : '💘 type: ???');
   facts.push(c.known.rel ? `${REL_LABELS[c.relStyle].chip} — ${REL_LABELS[c.relStyle].desc}` : '💞 relationship style: ???');
+  // the web is public knowledge — who they're tangled up with around town
+  for (const b of (c.bonds || []).slice(0, 3)) facts.push(`🕸️ ${bondChip(b)}`);
   $('#profile').innerHTML = facts.map(f => `<div class="fact">${f}</div>`).join('');
 
   const finaleReady = interested && !c.partner && c.affection >= FINALE_MIN_AFF && c.desire >= FINALE_MIN_DES;
@@ -648,6 +660,31 @@ function registerRomance(withC, pub = 0.3, extraIds = []) {
         text: rng.pick(['We need to talk. Tonight. Not over text.', 'Interesting things reach my ears, {0}. Come see me.', 'You. Me. A conversation. Soon. 🙂 (the 🙂 is loadbearing)'])
           .replace('{0}', S.player.name),
       });
+    }
+  }
+  // the web reacts by NAME: whoever is bonded to the person you just romanced
+  // hears about it specifically, and it lands differently per bond type.
+  for (const bond of withC.bonds || []) {
+    const y = S.npcs.find(n => n.id === bond.id);
+    if (!y || skip.has(y.id)) continue;
+    if (bond.type === 'dating') {
+      // you're flirting with their partner — that's a real problem
+      y.jealousy = (y.jealousy ?? 0) + 3; y.mood = Math.max(-2, y.mood - 1);
+      if (!y.pendingConfront && !y.pendingPriority) {
+        y.pendingPriority = true;
+        S.texts.push({ npcId: y.id, read: false, day: S.player.day,
+          text: `That's ${withC.name} you were all over. ${withC.name} is with ME, ${S.player.name}. We should talk. 😤` });
+      }
+    } else if (bond.type === 'ex' && isInterested(y, playerForDialogue())) {
+      // dating an ex's ex — petty, jealous, or intrigued
+      y.jealousy = (y.jealousy ?? 0) + 1.5;
+      S.texts.push({ npcId: y.id, read: false, day: S.player.day,
+        text: rng.pick([`Of all people… ${withC.name}? Really? 🙃`, `So you and ${withC.name}, huh. Small town. 😒`]) });
+    } else if (bond.type === 'bestie') {
+      // besties tell each other everything — word travels instantly
+      y.suspicion = (y.suspicion ?? 0) + 1;
+      if (isInterested(y, playerForDialogue()) && tierFor(y) >= 1)
+        y.jealousy = (y.jealousy ?? 0) + 0.8;
     }
   }
   flushTextsBadge();
@@ -2099,9 +2136,16 @@ function aiConfig() {
 // fluid, continuous conversation — not canned one-liners.
 function personaSystemPrompt(persona) {
   const w = persona.world || {};
+  const bondLines = (persona.bonds || []).map(b => {
+    const rel = { dating: 'You are dating', ex: 'You used to date', bestie: 'Your best friend is',
+      rival: 'You have bad blood with', sibling: 'Your sibling is' }[b.type] || 'You know';
+    return `${rel} ${b.name} (another local) — react naturally if they come up.`;
+  });
   return [
     `You are ${persona.name}, ${persona.age}, a real person in the beach town of Beach City. Pronouns: ${persona.pronouns}.`,
     `Personality: ${persona.personality}. Job: ${persona.job}. From ${persona.hometown}. Quirk: ${persona.quirk}.`,
+    ...voiceDirectives(persona.voice),
+    ...bondLines,
     persona.likes?.length ? `You love ${persona.likes.join(', ')}; you can't stand ${persona.dislikes?.join(', ') || 'rudeness'}.` : '',
     `You're talking with ${persona.playerName}. Relationship: ${persona.relationship}${persona.agreement && persona.agreement !== 'none' ? ' (' + persona.agreement + ')' : ''}. Your current mood: ${persona.mood}.`,
     w.location ? `Right now it's ${w.phase || 'daytime'} on day ${w.day || 1} of summer and you're both at ${w.location}.` : '',

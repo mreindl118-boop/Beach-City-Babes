@@ -364,7 +364,55 @@ function edit(page, fn) {
   if (!(bubbles >= 8)) errors.push('Unlimited texting: not all 8 texts logged, got ' + bubbles);
   await page.screenshot({ path: `${SHOT}/d13-unlimited.png` });
 
+  // --- 14. Relationship web: NPCs are bonded, and dating a bonded person
+  //         triggers a NAMED reaction from their partner/ex/bestie ---
+  const web = await page.evaluate(() => {
+    const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+    return S.npcs.map(c => ({ id: c.id, name: c.name, bonds: (c.bonds || []).map(b => ({ id: b.id, type: b.type, name: b.name })) }));
+  });
+  const totalBonds = web.reduce((n, c) => n + c.bonds.length, 0);
+  if (totalBonds === 0) errors.push('Web: no NPC-to-NPC bonds generated');
+  // bonds must be bidirectional
+  for (const c of web) for (const b of c.bonds) {
+    const other = web.find(o => o.id === b.id);
+    if (!other || !other.bonds.some(x => x.id === c.id)) errors.push(`Web: bond ${c.name}->${b.name} not reciprocated`);
+  }
+  // find a 'dating' bond and force-romance one partner; the OTHER should get a named priority text
+  const couple = web.find(c => c.bonds.some(b => b.type === 'dating'));
+  if (couple) {
+    const partnerBond = couple.bonds.find(b => b.type === 'dating');
+    await page.evaluate((ids) => {
+      const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+      const a = S.npcs.find(n => n.id === ids.a);
+      a.affection = 60; a.desire = 55; a.attractedTo = ['woman','man','enby'];
+      a.schedule = {}; ['dawn','morning','afternoon','evening','night','late'].forEach(p => a.schedule[p] = 'beach');
+      a.walkedToday = false;
+      S.activeId = a.id; S.player.location = 'beach'; S.player.hour = 20; S.player.coins = 200;
+      // clear the partner's queue so a new named text is unambiguous
+      const b = S.npcs.find(n => n.id === ids.b);
+      b.pendingConfront = false; b.pendingPriority = false; b.jealousy = 0;
+      S.texts = S.texts.filter(t => t.npcId !== ids.b);
+      localStorage.setItem('bcb_slot_1', JSON.stringify(S));
+    }, { a: couple.id, b: partnerBond.id });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.click('[data-load="1"]');
+    await page.waitForSelector('#portrait-box svg.portrait, #portrait-box img', { timeout: 5000 });
+    await page.waitForTimeout(400);
+    // a public flirt registers romance → partner reacts by name
+    await page.fill('#chat-input', 'you look absolutely incredible tonight');
+    await page.click('#chat-send');
+    await page.waitForTimeout(700);
+    const partnerText = await page.evaluate((bid) => {
+      const S = JSON.parse(localStorage.getItem('bcb_slot_1'));
+      const b = S.npcs.find(n => n.id === bid);
+      return { texts: S.texts.filter(t => t.npcId === bid).map(t => t.text), jealousy: b.jealousy, aName: S.npcs.find(n => n.id === S.activeId).name };
+    }, partnerBond.id);
+    const named = partnerText.texts.some(t => t.includes(partnerText.aName));
+    if (!(named || partnerText.jealousy > 0)) errors.push('Web: dating a bonded partner did not trigger a named reaction; texts=' + JSON.stringify(partnerText.texts));
+    await page.screenshot({ path: `${SHOT}/d14-web.png` });
+  }
+
   await browser.close();
   if (errors.length) { console.log('DRAMA ERRORS:\n' + errors.join('\n')); process.exit(1); }
-  console.log('DRAMA E2E PASS — DTR, confront, ultimatum, stray, group, migration, jealousy/priority, rival ultimatum, reconcile, unlimited texting');
+  console.log('DRAMA E2E PASS — DTR, confront, ultimatum, stray, group, migration, jealousy/priority, rival, reconcile, unlimited texting, relationship web');
 })().catch(e => { console.error('FATAL', e); process.exit(1); });
