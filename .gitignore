@@ -1,0 +1,4 @@
+node_modules/
+tools/e2e/screenshots/
+*.apk
+.DS_Store
